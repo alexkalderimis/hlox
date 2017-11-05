@@ -137,7 +137,7 @@ eval (GetField loc e field) = do
           case HM.lookup field hm of
             Nothing -> gets bindings >>= getMethod cls inst
             Just v -> return v
-      _ -> throwError (LoxError loc $ "Cannot access field of " <> typeOf inst)
+      _ -> loxError loc $ "Cannot access field of " <> typeOf inst
     where
         fieldNotFound = throwError $ FieldNotFound loc field
         getMethod (Class _ meths) inst env = do
@@ -153,13 +153,13 @@ eval (Negate loc e) = do
     v <- eval e
     case v of
         LoxNum n -> return $ LoxNum (negate n)
-        _        -> throwError . LoxError loc $ "expected number, got " <> show v
+        _        -> loxError loc $ "expected number, got " <> show v
 
 eval (Not loc e) = do
     v <- eval e
     case v of
         LoxBool b -> return (LoxBool $ not b)
-        _         -> throwError . LoxError loc $ "Expected boolean, got " <> show v
+        _         -> loxError loc $ "Expected boolean, got " <> show v
 
 eval (Binary And x y) = do
     a <- eval x
@@ -175,12 +175,12 @@ eval (Binary Or x y) = do
 
 eval b@(Binary op x y) = do
     case HM.lookup op binaryFns of
-        Nothing -> throwError . LoxError (sourceLoc b)
-                              $ "Unknown operator: " <> show op
+        Nothing -> loxError (sourceLoc b) $ "Unknown operator: " <> show op
         Just f  -> do a <- eval x
                       b <- eval y
                       f a b `catchError` locateError
-    where locateError (LoxError Unlocated e) = throwError (LoxError (sourceLoc b) e)
+
+    where locateError (LoxError Unlocated e) = loxError (sourceLoc b) e
           locateError e                      = throwError e
 
 eval (IfThenElse _ p x y) = do
@@ -189,28 +189,29 @@ eval (IfThenElse _ p x y) = do
 
 eval (Var loc v) = do
     env <- gets bindings
-    ma <- maybe (throwError undef) (liftIO . deref) (resolve v env)
+    ma <- maybe undef (liftIO . deref) (resolve v env)
     case ma of
-        Nothing -> throwError uninit
+        Nothing -> uninit
         Just v -> return v
 
-    where undef = LoxError loc $ "Undefined variable: " <> show v
-          uninit = LoxError loc $ "Uninitialised variable: " <> show v
+    where undef = loxError loc $ "Undefined variable: " <> show v
+          uninit = loxError loc $ "Uninitialised variable: " <> show v
 
 eval (Assign loc (LVar v) e) = do
     x <- eval e
     env <- gets bindings
     declared <- liftIO (assign v x env)
     if not declared
-        then throwError undeclared
+        then undeclared
         else return x
-    where undeclared = LoxError loc $ "Cannot set undeclared variable: " <> show v
+    where undeclared = loxError loc $ "Cannot set undeclared variable: " <> show v
+
 eval (Assign loc (Set lhs fld) e) = do
     v <- eval e
     o <- eval lhs
     case o of
       LoxObj (Object _ fs) -> assignField fs v >> return v
-      _                    -> throwError $ LoxError loc ("Cannot assign to " <> typeOf o)
+      _                    -> loxError loc ("Cannot assign to " <> typeOf o)
     where
         assignField fs v = liftIO (modifyIORef fs (HM.insert fld v))
 
@@ -219,7 +220,7 @@ eval (Call loc callee args) = do
     case e of
         LoxFn fn -> mapM eval args >>= apply loc fn
         LoxClass cls -> mapM eval args >>= instantiate loc cls
-        _        -> throwError . LoxError loc $ "Cannot call " <> typeOf e
+        _        -> loxError loc $ "Cannot call " <> typeOf e
 
 instantiate :: SourceLocation -> Class -> [Atom] -> LoxT Atom
 instantiate loc cls args = do
@@ -228,10 +229,10 @@ instantiate loc cls args = do
     return (LoxObj $ Object cls flds)
     where
         getConstructor _ 0 = return (\[] -> return HM.empty)
-        getConstructor _ _ = throwError (LoxError loc $ "Cannot find constructor")
+        getConstructor _ _ = loxError loc $ "Cannot find constructor"
 
 bind :: [(VarName, Atom)] -> Callable -> LoxT Atom
-bind xs (BuiltIn _ _) = throwError $ LoxError Unlocated "Cannot bind native functions, yet"
+bind xs (BuiltIn _ _) = loxError Unlocated "Cannot bind native functions, yet"
 bind xs (Function ns body env) = LoxFn . Function ns body <$> liftIO (enterScopeWith xs env)
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
@@ -342,3 +343,10 @@ binaryFns = HM.fromList
 
 throw' :: String -> LoxT a
 throw' = throwError . LoxError Unlocated
+
+loxError :: SourceLocation -> String -> LoxT a
+loxError loc msg = throwError (LoxError (simplify loc) msg)
+    where simplify Unlocated = Unlocated
+          simplify loc = let (l@(a, b, c), r@(d, e, f)) = range loc
+                          in if l == r then SourceLocation a b c
+                                       else SourceLocation a b c :..: SourceLocation d e f
