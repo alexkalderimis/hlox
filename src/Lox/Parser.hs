@@ -19,6 +19,7 @@ data ParserState = ParserState
     , location :: !SourceLocation
     , breakable :: !Bool
     , returnable :: !Bool
+    , inMethod :: !Bool
     } deriving (Show)
 
 tokenStream :: FilePath -> Tokens -> ParserState
@@ -27,6 +28,7 @@ tokenStream fp ts = ParserState
     , location = SourceLocation (pack fp) 0 0
     , breakable = False
     , returnable = False
+    , inMethod = False
     }
 
 newtype Parser a = Parser
@@ -76,13 +78,13 @@ classDeclaration = do
     start <- loc
     IDENTIFIER className <- next
     expect LEFT_BRACE 
-    methods <- many method
+    methods <- many (method <* skipWhile (== SEMICOLON))
     expect RIGHT_BRACE
     end <- loc
     return (ClassDecl (start :..: end) className methods)
 
 method :: Parser (VarName, [VarName], Statement)
-method = (,,) <$> identifier <*> arguments <*> functionBody EQUAL
+method = withinMethod $ (,,) <$> identifier <*> arguments <*> functionBody EQUAL
 
 functionDefinition :: Parser Statement
 functionDefinition = do
@@ -245,15 +247,20 @@ discard = binary [(COMMA, Seq)] assignment
 
 assignment :: Parser Expr
 assignment = do
-    lval <- ifThenElse <|> booleans
-    assign' lval <|> return lval
+    assign' <|> ifThenElse <|> booleans
     where
-        assign' lval = do
+        assign' = do
+            here <- loc
+            lhs <- lval
             expect EQUAL
             e <- assignment
-            case lval of
-              (Var l v) -> return (Assign (l :..: sourceLoc e) v e)
-              _         -> fail ("Cannot assign to " <> show lval)
+            return (Assign (here :..: sourceLoc e) lhs e)
+        lval = do
+            lhs <- call
+            case lhs of
+              (GetField loc e name) -> return (Set e name)
+              (Var loc name) -> return (LVar name)
+              _ -> empty
 
 ifThenElse :: Parser Expr
 ifThenElse = do
@@ -339,6 +346,8 @@ atom = ident <|> p <|> group <|> fail "expected an expression"
                  l <- loc
                  case t of
                    IDENTIFIER v -> return (Var l v)
+                   KEYWORD "this" -> do inM <- is inMethod
+                                        if inM then return (Var l "this") else empty
                    _ -> empty
       p = do
             t <- next
@@ -405,6 +414,16 @@ is f = Parser $ \s -> (Right (f s), s)
 
 loc :: Parser SourceLocation
 loc = is location
+
+withinMethod :: Parser a -> Parser a
+withinMethod pa = do
+    b <- is inMethod
+    set True
+    a <- pa
+    set b
+    return a
+    where
+        set b = Parser $ \s -> (Right (), s { inMethod = b })
 
 -- allow parsers to define zones where return statements are allowed
 returning :: Parser a -> Parser a

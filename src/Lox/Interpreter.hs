@@ -4,6 +4,8 @@
 
 module Lox.Interpreter where
 
+import Data.IORef
+import Control.Arrow (second)
 import Control.Applicative
 import Data.Char (toLower)
 import Data.HashMap.Strict (HashMap)
@@ -15,6 +17,7 @@ import Data.Monoid
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import System.Clock
+import Data.Traversable
 import qualified Data.List as L
 import qualified Data.Text as T
 
@@ -46,7 +49,9 @@ class Monad m => MonadLox m where
     printLox :: Atom -> m ()
 
 instance MonadLox IO where
-    printLox a = putStrLn (stringify a)
+    printLox a = do
+        s <- runLoxT (stringify a) (Interpreter mempty mempty)
+        either (error . show) putStrLn s
 
 instance (MonadLox m) => MonadLox (StateT s m) where
     printLox a = lift (printLox a)
@@ -75,7 +80,7 @@ exec (Print _ e) = do v <- eval e
 exec (ExprS e) = eval e
 exec (DefineFn loc v ns body) = do
     exec (Declare loc v) -- functions can recurse, so declare before define
-    eval (Assign loc v (Lambda loc ns body))
+    eval (Assign loc (LVar v) (Lambda loc ns body))
 exec (Define loc v e) = do
     isBound <- gets (inCurrentScope v . bindings)
     when isBound $ 
@@ -127,10 +132,12 @@ eval (Lambda _ args body) = LoxFn . Function args body <$> gets bindings
 eval (GetField loc e field) = do
     inst <- eval e
     case inst of
-      (LoxObj (Object cls fs)) -> case HM.lookup field fs of
-                                    Nothing -> gets bindings >>= getMethod cls inst
-                                    Just v -> return v
-      _                        -> throwError (LoxError loc $ "Cannot access field of " <> typeOf inst)
+      (LoxObj (Object cls fs)) -> do
+          hm <- liftIO (readIORef fs)
+          case HM.lookup field hm of
+            Nothing -> gets bindings >>= getMethod cls inst
+            Just v -> return v
+      _ -> throwError (LoxError loc $ "Cannot access field of " <> typeOf inst)
     where
         fieldNotFound = throwError $ FieldNotFound loc field
         getMethod (Class _ meths) inst env = do
@@ -190,7 +197,7 @@ eval (Var loc v) = do
     where undef = LoxError loc $ "Undefined variable: " <> show v
           uninit = LoxError loc $ "Uninitialised variable: " <> show v
 
-eval (Assign loc v e) = do
+eval (Assign loc (LVar v) e) = do
     x <- eval e
     env <- gets bindings
     declared <- liftIO (assign v x env)
@@ -198,6 +205,14 @@ eval (Assign loc v e) = do
         then throwError undeclared
         else return x
     where undeclared = LoxError loc $ "Cannot set undeclared variable: " <> show v
+eval (Assign loc (Set lhs fld) e) = do
+    v <- eval e
+    o <- eval lhs
+    case o of
+      LoxObj (Object _ fs) -> assignField fs v >> return v
+      _                    -> throwError $ LoxError loc ("Cannot assign to " <> typeOf o)
+    where
+        assignField fs v = liftIO (modifyIORef fs (HM.insert fld v))
 
 eval (Call loc callee args) = do
     e <- eval callee
@@ -209,7 +224,7 @@ eval (Call loc callee args) = do
 instantiate :: SourceLocation -> Class -> [Atom] -> LoxT Atom
 instantiate loc cls args = do
     construct <- getConstructor cls (length args)
-    flds <- construct args
+    flds <- (liftIO . newIORef) =<< construct args
     return (LoxObj $ Object cls flds)
     where
         getConstructor _ 0 = return (\[] -> return HM.empty)
@@ -277,8 +292,10 @@ typeOf (LoxClass _) = "Class"
 addAtoms :: BinaryFn
 addAtoms (LoxString a) (LoxString b) = return $ LoxString (a <> b)
 addAtoms (LoxNum a) (LoxNum b) = return $ LoxNum (a + b)
-addAtoms a (LoxString b) = return $ LoxString (T.pack (stringify a) <> b)
-addAtoms (LoxString a) b = return $ LoxString (a <> T.pack (stringify b))
+addAtoms a (LoxString b) = do s <- T.pack <$> stringify a
+                              return $ LoxString (s <> b)
+addAtoms (LoxString a) b = do s <- T.pack <$> stringify b
+                              return $ LoxString (a <> s)
 addAtoms a b = throw' ("Cannot add: " <> show a <> " and " <> show b)
 
 numericalFn :: String -> (Double -> Double -> Double) -> BinaryFn
@@ -287,17 +304,20 @@ numericalFn name _ a b = throw' $ concat [ "Cannot ", name, ": "
                                          , show a, " and ", show b
                                          ]
 
-stringify :: Atom -> String
-stringify LoxNil = "nil"
-stringify (LoxString t) = T.unpack t
-stringify (LoxBool b) = fmap toLower (show b)
-stringify (LoxNum n) = let s = show n
-                       in if isInteger n then takeWhile (/= '.') s else s
-stringify (LoxFn fn) = "<function>"
-stringify (LoxClass (Class nm _)) = "<class " <> T.unpack nm <> ">"
-stringify (LoxObj (Object (Class n _) flds)) =
-    concat $ ["<", T.unpack n, " "]
-             ++ L.intersperse " " [T.unpack k <> "=" <> stringify v | (k, v) <- HM.toList flds]
+stringify :: Atom -> LoxT String
+stringify LoxNil = return "nil"
+stringify (LoxString t) = return $ T.unpack t
+stringify (LoxBool b) = return $ fmap toLower (show b)
+stringify (LoxNum n) = return $
+    let s = show n in if isInteger n then takeWhile (/= '.') s else s
+stringify (LoxFn fn) = return "<function>"
+stringify (LoxClass (Class nm _)) = return $ "<class " <> T.unpack nm <> ">"
+stringify (LoxObj (Object (Class n _) flds)) = do
+    fs <- HM.toList <$> liftIO (readIORef flds)
+    fs' <- mapM (sequence . second stringify) fs
+    return $ concat
+           $ ["<", T.unpack n, " "]
+             ++ L.intersperse " " [T.unpack k <> "=" <> v | (k, v) <- fs']
              ++ [">"]
 
 isInteger :: Double -> Bool

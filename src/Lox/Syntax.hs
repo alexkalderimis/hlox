@@ -5,6 +5,7 @@ module Lox.Syntax where
 
 import GHC.Generics (Generic)
 
+import Data.IORef
 import qualified Data.List as L
 import Data.Monoid
 import Data.Hashable (Hashable)
@@ -58,6 +59,10 @@ instance Located Statement where
     sourceLoc (If loc _ _ _) = loc
     sourceLoc (ClassDecl loc _ _) = loc
 
+data LVal = LVar VarName
+          | Set Expr VarName
+          deriving (Show, Eq)
+
 data Expr = Literal SourceLocation Atom
           | Grouping SourceLocation Expr
           | Var SourceLocation VarName
@@ -65,7 +70,7 @@ data Expr = Literal SourceLocation Atom
           | Not SourceLocation Expr
           | Binary BinaryOp Expr Expr
           | IfThenElse SourceLocation Expr Expr Expr
-          | Assign SourceLocation VarName Expr
+          | Assign SourceLocation LVal Expr
           | Call SourceLocation Expr [Expr]
           | Lambda SourceLocation [VarName] Statement
           | GetField SourceLocation Expr VarName
@@ -117,12 +122,14 @@ data Atom = LoxNil
 data Class = Class VarName (HM.HashMap VarName Callable)
     deriving (Show)
 
-data Object = Object Class (HM.HashMap VarName Atom)
-    deriving (Show, Eq)
+data Object = Object Class (IORef (HM.HashMap VarName Atom))
+    deriving (Eq)
+
+instance Show Object where
+    show (Object (Class n _) _) = "<" <> unpack n <> " instance>"
 
 instance Ord Object where
-    (Object n flds) `compare` (Object n' flds') =
-        (n, L.sort (HM.toList flds)) `compare` (n', L.sort (HM.toList flds'))
+    (Object n _) `compare` (Object n' _) = n `compare` n'
 
 instance Eq Class where
     (Class a _) == (Class b _) = a == b
