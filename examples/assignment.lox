@@ -1,0 +1,12 @@
+class Foo {
+    bar() {
+        return this.x
+    }
+
+    baz() = this.x * this.y
+}
+let foo = Foo()
+foo.x = 100
+foo.y = 101
+
+print foo.bar() + foo.baz() + foo.x + foo.y
