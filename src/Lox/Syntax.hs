@@ -68,6 +68,7 @@ data Expr = Literal SourceLocation Atom
           | Assign SourceLocation VarName Expr
           | Call SourceLocation Expr [Expr]
           | Lambda SourceLocation [VarName] Statement
+          | GetField SourceLocation Expr VarName
           deriving (Show, Eq)
 
 instance Located Expr where
@@ -81,6 +82,7 @@ instance Located Expr where
     sourceLoc (Assign loc _ _) = loc
     sourceLoc (Call loc _ _) = loc
     sourceLoc (Lambda loc _ _) = loc
+    sourceLoc (GetField loc _ _) = loc
 
 -- Native function that supports errors and IO
 type NativeFn = [Atom] -> IO (Either String Atom)

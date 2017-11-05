@@ -299,14 +299,21 @@ unary = p <|> fnExpr <|> call <|> atom
                 MINUS -> return (Negate (start :..: end) e)
 
 call :: Parser Expr
-call = do
-    e <- atom
-    mp <- optional (expect LEFT_PAREN)
-    case mp of
-      Nothing -> return e
-      Just _  -> do args <- manySepBy COMMA assignment <* expect RIGHT_PAREN
-                    end <- loc
-                    return $ Call (sourceLoc e :..: end) e args
+call = atom >>= finishCall
+  where finishCall e = do
+          mp <- optional (anyOf [DOT, LEFT_PAREN])
+          case mp of
+            Nothing -> return e
+            Just LEFT_PAREN  -> do
+                args <- manySepBy COMMA assignment <* expect RIGHT_PAREN
+                end <- loc
+                return $ Call (sourceLoc e :..: end) e args
+            Just DOT -> do
+                IDENTIFIER name <- next
+                end <- loc
+                let access = GetField (sourceLoc e :..: end) e name
+                finishCall access
+          
 
 group :: Parser Expr
 group = do

@@ -31,6 +31,7 @@ data Interpreter = Interpreter
     }
 
 data LoxExecption = LoxError SourceLocation String
+                  | FieldNotFound SourceLocation VarName
                   | LoxReturn SourceLocation Atom
                   | LoxBreak SourceLocation
                   | LoxContinue SourceLocation
@@ -123,6 +124,20 @@ eval :: Expr -> LoxT Atom
 
 eval (Lambda _ args body) = LoxFn . Function args body <$> gets bindings
 
+eval (GetField loc e field) = do
+    inst <- eval e
+    case inst of
+      (LoxObj (Object cls fs)) -> case HM.lookup field fs of
+                                    Nothing -> gets bindings >>= getMethod cls inst
+                                    Just v -> return v
+      _                        -> throwError (LoxError loc $ "Cannot access field of " <> typeOf inst)
+    where
+        fieldNotFound = throwError $ FieldNotFound loc field
+        getMethod (Class _ meths) inst env = do
+            case HM.lookup field meths of
+              Nothing -> fieldNotFound
+              Just fn -> bind [("this", inst)] fn
+
 eval (Literal _ a) = pure a
 
 eval (Grouping _ e) = eval e
@@ -199,6 +214,10 @@ instantiate loc cls args = do
     where
         getConstructor _ 0 = return (\[] -> return HM.empty)
         getConstructor _ _ = throwError (LoxError loc $ "Cannot find constructor")
+
+bind :: [(VarName, Atom)] -> Callable -> LoxT Atom
+bind xs (BuiltIn _ _) = throwError $ LoxError Unlocated "Cannot bind native functions, yet"
+bind xs (Function ns body env) = LoxFn . Function ns body <$> liftIO (enterScopeWith xs env)
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
 apply loc fn args | arity fn /= length args = throwError (LoxError loc msg)
