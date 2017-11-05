@@ -100,7 +100,7 @@ run' ReplOpts{..} env code = do
       Right p -> do let lox = runProgram p
                     when showResult $ putStrLn "=== OUTPUT"
                     res <- evalLoxT (runProgram p)
-                                    (Interpreter (enterScope env) mempty)
+                                    (interpreter $ enterScope env)
                     case res of
                       Left e -> do putStr "[RUNTIME ERROR] "
                                    putStrLn (pack $ show e)

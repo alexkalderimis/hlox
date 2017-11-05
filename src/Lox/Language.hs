@@ -11,6 +11,6 @@ import Lox.Syntax (Env, Expr(..), Statement(..), Program, Atom(..))
 import Lox.Parser (tokenStream, expression, program, Parser(runParser))
 import Lox.Environment (Environment, enterScope, readEnv)
 import Lox.Interpreter (
-    Interpreter(..),
+    Interpreter(..), interpreter,
     LoxT, Value, printLox,
     builtins, eval, run, runProgram, runLoxT, evalLoxT)

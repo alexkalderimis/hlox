@@ -4,6 +4,8 @@
 
 module Lox.Interpreter where
 
+import Prelude hiding (init)
+
 import Data.Fixed
 import Control.Applicative
 import Control.Arrow (second)
@@ -34,7 +36,11 @@ type BinaryFn = (Atom -> Atom -> LoxT Atom)
 data Interpreter = Interpreter
     { bindings :: !Env
     , warnings :: !(HS.HashSet Text)
+    , initialising :: !Bool
     }
+
+interpreter :: Env -> Interpreter
+interpreter env = Interpreter env mempty False
 
 data LoxExecption = LoxError SourceLocation String
                   | FieldNotFound SourceLocation VarName
@@ -53,7 +59,7 @@ class Monad m => MonadLox m where
 
 instance MonadLox IO where
     printLox a = do
-        s <- runLoxT (stringify a) (Interpreter mempty mempty)
+        s <- runLoxT (stringify a) (interpreter mempty)
         either (error . show) putStrLn s
 
 instance (MonadLox m) => MonadLox (StateT s m) where
@@ -69,7 +75,7 @@ evalLoxT :: LoxT a -> Interpreter -> IO (Either LoxExecption (a, Interpreter))
 evalLoxT lox s = runExceptT $ runStateT lox s
 
 run :: Env -> Program -> IO Value
-run env program = runLoxT (runProgram program) (Interpreter env mempty)
+run env program = runLoxT (runProgram program) (interpreter env)
 
 runProgram :: Program -> LoxT Atom
 runProgram = foldM runStatement LoxNil
@@ -100,9 +106,10 @@ exec (Declare _ v) = do
     modify' $ \s -> s { bindings = env }
     return LoxNil
 
-exec (ClassDecl loc name methods) = do
+exec (ClassDecl loc name msuper methods) = do
     exec (Declare loc name)
     env <- gets bindings
+    parent <- sequence $ fmap (findSuperClass env) msuper
 
     let constructors = [ Function args body env | (Constructor args body) <- methods]
         statics      = [(n, Function as b env)  | (StaticMethod n as b) <- methods]
@@ -110,13 +117,27 @@ exec (ClassDecl loc name methods) = do
 
     -- verify constructors
     constructor <- case constructors of
-                        [] -> return Nothing
-                        [c] -> return $ Just c
-                        _ -> loxError loc $ "Multiple constructors declared for " <> T.unpack name
+                     []  -> return (parent >>= initializer)
+                     [c] -> return $ Just c
+                     _   -> loxError loc $ "Multiple constructors declared for " <> T.unpack name
 
-    let cls = LoxClass $ Class name constructor (HM.fromList statics) (HM.fromList instances)
+    let cls = LoxClass $ Class { className = name
+                               , superClass = parent
+                               , initializer = constructor
+                               , staticMethods = (HM.fromList statics)
+                               , methods = (HM.fromList instances)
+                               }
     liftIO $ assign name cls env
     return cls
+
+    where
+        findSuperClass env name = do
+            ma <- maybe undef (liftIO . deref) (resolve name env)
+            case ma of
+              Nothing -> undef
+              Just (LoxClass c) -> return c
+              Just a -> loxError loc $ "Cannot inherit from " <> typeOf a
+        undef = loxError loc $ "Could not find super-class " <> show name
 
 exec (Block _ sts) = do
     env <- gets bindings
@@ -152,6 +173,11 @@ eval (GetField loc e field) = do
     case inst of
       (LoxClass cls) | field == "name" -> return (LoxString $ className cls)
       (LoxClass cls) | Just sm <- HM.lookup field (staticMethods cls) -> return (LoxFn sm)
+      (LoxObj (Object cls _)) | field == "class" -> return (LoxClass cls)
+      (LoxObj (Object cls fs)) | field == "super" -> do
+          case superClass cls of
+            Nothing -> loxError loc "No super-class"
+            Just sup -> return (LoxObj (Object sup fs))
       (LoxObj (Object cls fs)) -> do
           hm <- liftIO (readIORef fs)
           case HM.lookup field hm of
@@ -159,10 +185,12 @@ eval (GetField loc e field) = do
             Just v -> return v
       _ -> loxError loc $ "Cannot access field of " <> typeOf inst
     where
-        fieldNotFound = throwError $ FieldNotFound loc field
+        fieldNotFound = throwError $ FieldNotFound (simplify loc) field
         getMethod cls inst env = do
             case HM.lookup field (methods cls) of
-              Nothing -> fieldNotFound
+              Nothing -> case superClass cls of
+                           Nothing -> fieldNotFound
+                           Just sup -> getMethod sup inst env
               Just fn -> LoxFn <$> bind [("this", inst)] fn
 
 eval (Literal _ a) = pure a
@@ -237,16 +265,17 @@ eval (Assign loc (Set lhs fld) e) = do
 
 eval (Call loc callee args) = do
     e <- eval callee
+
     case e of
         LoxFn fn -> mapM eval args >>= apply loc fn
         LoxClass cls -> mapM eval args >>= instantiate loc cls
+        LoxObj o -> do initing <- gets initialising
+                       if initing then LoxNil <$ (mapM eval args >>= init loc o)
+                                  else loxError loc $ "Cannot call initializer outside of init()"
         _        -> loxError loc $ "Cannot call " <> typeOf e
 
-instantiate :: SourceLocation -> Class -> [Atom] -> LoxT Atom
-instantiate loc cls args = do
-    obj       <- liftIO (new cls)
-    construct obj args
-    return (LoxObj $ obj)
+init :: SourceLocation -> Object -> [Atom] -> LoxT ()
+init loc obj@(Object cls _) args = construct obj args
     where
         construct = case initializer cls of
             Nothing -> defaultConstr
@@ -254,8 +283,16 @@ instantiate loc cls args = do
                                       apply loc bound args
                                       return ())
                                           
-        wrongArity n = loxError loc $ "Wrong number of arguments. Expected " <> show n
         defaultConstr _ args = when (not $ null args) $ wrongArity 0
+        wrongArity n = loxError loc $ unwords ["Wrong number of arguments to constructor."
+                                              ,"Expected", show n
+                                              ]
+
+instantiate :: SourceLocation -> Class -> [Atom] -> LoxT Atom
+instantiate loc cls args = do
+    obj     <- liftIO (new cls)
+    initialise (init loc obj args)
+    return (LoxObj $ obj)
 
 new :: Class -> IO Object
 new cls = Object cls <$> newIORef HM.empty
@@ -374,7 +411,18 @@ throw' = throwError . LoxError Unlocated
 
 loxError :: SourceLocation -> String -> LoxT a
 loxError loc msg = throwError (LoxError (simplify loc) msg)
-    where simplify Unlocated = Unlocated
-          simplify loc = let (l@(a, b, c), r@(d, e, f)) = range loc
-                          in if l == r then SourceLocation a b c
-                                       else SourceLocation a b c :..: SourceLocation d e f
+
+simplify :: SourceLocation -> SourceLocation
+simplify Unlocated = Unlocated
+simplify loc = let (l@(a, b, c), r@(d, e, f)) = range loc
+                in if l == r then SourceLocation a b c
+                             else SourceLocation a b c :..: SourceLocation d e f
+
+initialise :: LoxT a -> LoxT a
+initialise lox = do
+    initing <- gets initialising
+    modify' $ \s -> s { initialising = True }
+    r <- lox
+    modify' $ \s -> s { initialising = initing }
+    return r
+

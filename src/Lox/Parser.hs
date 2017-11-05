@@ -77,12 +77,13 @@ classDeclaration = do
     keyword "class"
     start <- loc
     IDENTIFIER className <- next
+    superClass <- optional (keyword "extends" >> identifier)
     expect LEFT_BRACE 
     methods <- many (method <* skipWhile (== SEMICOLON))
     expect RIGHT_BRACE
     end <- loc
 
-    return (ClassDecl (start :..: end) className methods)
+    return (ClassDecl (start :..: end) className superClass methods)
 
 method :: Parser Method
 method = constructor <|> staticMethod <|> instanceMethod
@@ -325,13 +326,13 @@ call = atom >>= finishCall
             Just LEFT_PAREN  -> do
                 args <- manySepBy COMMA assignment <* expect RIGHT_PAREN
                 end <- loc
-                return $ Call (sourceLoc e :..: end) e args
+                finishCall $ Call (sourceLoc e :..: end) e args
             Just DOT -> do
-                IDENTIFIER name <- next
+                meth <- is inMethod
+                name <- identifier <|> ("class" <$ keyword "class")
+                                   <|> (if meth then "super" <$ keyword "super" else empty) 
                 end <- loc
-                let access = GetField (sourceLoc e :..: end) e name
-                finishCall access
-          
+                finishCall $ GetField (sourceLoc e :..: end) e name
 
 group :: Parser Expr
 group = do

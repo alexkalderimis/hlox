@@ -1,0 +1,55 @@
+class Animal {
+    speak() {
+        print this.class.name + " says " + this.noise
+    }
+}
+
+class Cat extends Animal {
+    init() {
+        this.noise = "meow"
+    }
+}
+
+class Dog extends Animal {
+    init() {
+        this.noise = "woof"
+    }
+}
+
+class Fish extends Animal {
+    init() {
+        this.noise = "blubb"
+    }
+}
+
+class Salmon extends Fish {}
+
+class Worm extends Animal {
+    speak() {
+        print this.class.name + " cannot speak"
+    }
+}
+
+class Cerberus extends Dog {
+    init() {
+        this.super()
+        this.exists = false
+    }
+}
+
+class TalkativeCat extends Cat {
+    speak() {
+        this.super.speak()
+        this.super.speak()
+    }
+}
+
+Cat().speak()
+Dog().speak()
+Fish().speak()
+Salmon().speak()
+Worm().speak()
+let hellHound = Cerberus()
+hellHound.speak()
+print "Hellhounds exist? " + hellHound.exists
+TalkativeCat().speak()

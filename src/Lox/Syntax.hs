@@ -44,7 +44,7 @@ data Statement = While SourceLocation Expr Statement
                | Continue SourceLocation
                | Return SourceLocation Expr
                | If SourceLocation Expr Statement (Maybe Statement)
-               | ClassDecl SourceLocation VarName [Method]
+               | ClassDecl SourceLocation VarName (Maybe VarName) [Method]
             deriving (Show, Eq)
 
 data Method = Constructor [VarName] Statement
@@ -63,7 +63,7 @@ instance Located Statement where
     sourceLoc (Continue loc) = loc
     sourceLoc (Return loc _) = loc
     sourceLoc (If loc _ _ _) = loc
-    sourceLoc (ClassDecl loc _ _) = loc
+    sourceLoc (ClassDecl loc _ _ _) = loc
 
 data LVal = LVar VarName
           | Set Expr VarName
@@ -129,6 +129,7 @@ type Methods = HM.HashMap VarName Callable
 
 data Class = Class
     { className :: VarName
+    , superClass :: Maybe Class
     , initializer :: Maybe Callable
     , staticMethods :: Methods
     , methods :: Methods

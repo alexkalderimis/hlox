@@ -28,7 +28,7 @@ data ScannerState = ScannerState
 runScanner :: Scanner -> (Tokens, [ScanError])
 runScanner scanner = (reverse.productions &&& failed)
                    $ execState scanner
-                   $ ScannerState [] [] 0 0
+                   $ ScannerState [] [] 1 0
 
 type ScanError = (Int, Int, Text)
 type Tokens = [(Int, Int, Token)]
@@ -60,7 +60,7 @@ data Token =
 reservedWords :: HS.HashSet Text
 reservedWords = HS.fromList
     ["and", "or", "if", "then", "else", "false", "true"
-    ,"class", "fun", "super", "this", "static"
+    ,"class", "extends", "fun", "super", "this", "static"
     ,"let"
     ,"print", "return"
     ,"while", "for", "break", "continue"
