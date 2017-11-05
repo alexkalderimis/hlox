@@ -5,6 +5,7 @@ module Lox.Syntax where
 
 import GHC.Generics (Generic)
 
+import qualified Data.List as L
 import Data.Monoid
 import Data.Hashable (Hashable)
 import Data.Text hiding (length, reverse)
@@ -41,6 +42,7 @@ data Statement = While SourceLocation Expr Statement
                | Continue SourceLocation
                | Return SourceLocation Expr
                | If SourceLocation Expr Statement (Maybe Statement)
+               | ClassDecl SourceLocation VarName [(VarName, [VarName], Statement)]
             deriving (Show, Eq)
 
 instance Located Statement where
@@ -54,6 +56,7 @@ instance Located Statement where
     sourceLoc (Continue loc) = loc
     sourceLoc (Return loc _) = loc
     sourceLoc (If loc _ _ _) = loc
+    sourceLoc (ClassDecl loc _ _) = loc
 
 data Expr = Literal SourceLocation Atom
           | Grouping SourceLocation Expr
@@ -101,12 +104,29 @@ instance Eq Callable where
     a == b = True
 
 data Atom = LoxNil
-          | LoxUndefined
           | LoxBool Bool
           | LoxNum Double
           | LoxString Text
           | LoxFn Callable
+          | LoxClass Class
+          | LoxObj Object 
           deriving (Ord, Show, Eq)
+
+data Class = Class VarName (HM.HashMap VarName Callable)
+    deriving (Show)
+
+data Object = Object Class (HM.HashMap VarName Atom)
+    deriving (Show, Eq)
+
+instance Ord Object where
+    (Object n flds) `compare` (Object n' flds') =
+        (n, L.sort (HM.toList flds)) `compare` (n', L.sort (HM.toList flds'))
+
+instance Eq Class where
+    (Class a _) == (Class b _) = a == b
+
+instance Ord Class where
+    (Class a _) `compare` (Class b _) = a `compare` b
 
 data BinaryOp = Equals
               | NotEquals

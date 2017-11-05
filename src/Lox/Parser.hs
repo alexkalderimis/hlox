@@ -63,15 +63,30 @@ eof = expect EOF <|> (do n <- next
                          fail ("Expected EOF, got " <> show n))
 
 declaration :: Parser Statement
-declaration =   (functionDefinition <* semis)
+declaration =   (classDeclaration <* semis)
+            <|> (functionDefinition <* semis)
             <|> (varDefinition <* semis)
             <|> (varDeclaration <* semis)
             <|> statement
     where semis = skipWhile (== SEMICOLON)
 
+classDeclaration :: Parser Statement
+classDeclaration = do
+    keyword "class"
+    start <- loc
+    IDENTIFIER className <- next
+    expect LEFT_BRACE 
+    methods <- many method
+    expect RIGHT_BRACE
+    end <- loc
+    return (ClassDecl (start :..: end) className methods)
+
+method :: Parser (VarName, [VarName], Statement)
+method = (,,) <$> identifier <*> arguments <*> functionBody EQUAL
+
 functionDefinition :: Parser Statement
 functionDefinition = do
-    expect (KEYWORD "fun")
+    keyword "fun"
     start <- loc
     IDENTIFIER var <- next
     args <- arguments
@@ -331,6 +346,11 @@ atom = ident <|> p <|> group <|> fail "expected an expression"
                                 _ -> fail ("Unexpected keyword: " <> show kw)
                 _ -> fail ("Unexpected token: " <> show t)
             return (Literal l a)
+
+type Keyword = Text
+
+keyword :: Keyword -> Parser ()
+keyword = expect . KEYWORD
 
 expect :: Token -> Parser ()
 expect t = (() <$ anyOf [t]) <|> fail ("expected " <> show t)

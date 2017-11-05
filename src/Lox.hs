@@ -57,7 +57,7 @@ runPrompt = welcome >> builtins >>= go replOpts
               Just ":a" -> go (opts{ showAST = not (showAST opts) }) env
               Just ":s" -> go (opts{ showState = not (showState opts) }) env
               Just ":r" -> go (opts{ showResult = not (showResult opts) }) env
-              Just ":env" -> do readEnv env >>= print
+              Just ":env" -> do readEnv env >>= printBindings
                                 go opts env
               Just code -> do env' <- run' opts env (pack code)
                               addHistory code
@@ -113,11 +113,20 @@ run' ReplOpts{..} env code = do
                               print v
                           when showState $ do
                               putStrLn "==== STATE"
-                              readEnv (bindings s) >>= print
+                              readEnv (bindings s) >>= printBindings
                           when (not $ HS.null $ warnings s) $ do
                               mapM_ (putStrLn . ("[WARNING] " <>)) (warnings s)
                           return (bindings s)
 
+printBindings :: [HashMap Text Atom] -> IO ()
+printBindings [] = return ()
+printBindings (m:ms) = do
+    putStrLn "-------------"
+    forM (HM.toList m) $ \(k, v) -> do
+        putStr k
+        putStr " = "
+        printLox v
+    printBindings ms
 printError :: Maybe Error -> IO ()
 printError (Just (Error lineno loc msg)) = hPutStrLn stderr msg'
     where msg' = mconcat ["[line " ,pack (show lineno)

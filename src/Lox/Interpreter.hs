@@ -15,6 +15,7 @@ import Data.Monoid
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import System.Clock
+import qualified Data.List as L
 import qualified Data.Text as T
 
 import Lox.Syntax
@@ -85,7 +86,14 @@ exec (Define loc v e) = do
 exec (Declare _ v) = do
     env <- gets bindings >>= liftIO . declare v
     modify' $ \s -> s { bindings = env }
-    return LoxUndefined
+    return LoxNil
+exec (ClassDecl loc name methods) = do
+    exec (Declare loc name)
+    env <- gets bindings
+    let ms = HM.fromList [(nm, Function args body env) | (nm, args, body) <- methods]
+        cls = Class name ms
+    liftIO $ assign name (LoxClass cls) env
+    return (LoxClass cls)
 exec (Block _ sts) = do
     env <- gets bindings
     modify' $ \s -> s { bindings = enterScope (bindings s) }
@@ -180,7 +188,17 @@ eval (Call loc callee args) = do
     e <- eval callee
     case e of
         LoxFn fn -> mapM eval args >>= apply loc fn
+        LoxClass cls -> mapM eval args >>= instantiate loc cls
         _        -> throwError . LoxError loc $ "Cannot call " <> typeOf e
+
+instantiate :: SourceLocation -> Class -> [Atom] -> LoxT Atom
+instantiate loc cls args = do
+    construct <- getConstructor cls (length args)
+    flds <- construct args
+    return (LoxObj $ Object cls flds)
+    where
+        getConstructor _ 0 = return (\[] -> return HM.empty)
+        getConstructor _ _ = throwError (LoxError loc $ "Cannot find constructor")
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
 apply loc fn args | arity fn /= length args = throwError (LoxError loc msg)
@@ -234,8 +252,8 @@ typeOf (LoxString _) = "String"
 typeOf (LoxNum _) = "Number"
 typeOf (LoxBool _) = "Boolean"
 typeOf LoxNil = "nil"
-typeOf LoxUndefined = "undefined"
 typeOf (LoxFn _) = "Function"
+typeOf (LoxClass _) = "Class"
 
 addAtoms :: BinaryFn
 addAtoms (LoxString a) (LoxString b) = return $ LoxString (a <> b)
@@ -257,6 +275,11 @@ stringify (LoxBool b) = fmap toLower (show b)
 stringify (LoxNum n) = let s = show n
                        in if isInteger n then takeWhile (/= '.') s else s
 stringify (LoxFn fn) = "<function>"
+stringify (LoxClass (Class nm _)) = "<class " <> T.unpack nm <> ">"
+stringify (LoxObj (Object (Class n _) flds)) =
+    concat $ ["<", T.unpack n, " "]
+             ++ L.intersperse " " [T.unpack k <> "=" <> stringify v | (k, v) <- HM.toList flds]
+             ++ [">"]
 
 isInteger :: Double -> Bool
 isInteger d = d == fromInteger (floor d)
