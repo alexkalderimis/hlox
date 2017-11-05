@@ -43,7 +43,12 @@ data Statement = While SourceLocation Expr Statement
                | Continue SourceLocation
                | Return SourceLocation Expr
                | If SourceLocation Expr Statement (Maybe Statement)
-               | ClassDecl SourceLocation VarName [(VarName, [VarName], Statement)]
+               | ClassDecl SourceLocation VarName [Method]
+            deriving (Show, Eq)
+
+data Method = Constructor [VarName] Statement
+            | StaticMethod VarName [VarName] Statement
+            | InstanceMethod VarName [VarName] Statement
             deriving (Show, Eq)
 
 instance Located Statement where
@@ -119,23 +124,29 @@ data Atom = LoxNil
           | LoxObj Object 
           deriving (Ord, Show, Eq)
 
-data Class = Class VarName (HM.HashMap VarName Callable)
-    deriving (Show)
+type Methods = HM.HashMap VarName Callable
+
+data Class = Class
+    { className :: VarName
+    , initializer :: Maybe Callable
+    , staticMethods :: Methods
+    , methods :: Methods
+    } deriving (Show)
 
 data Object = Object Class (IORef (HM.HashMap VarName Atom))
     deriving (Eq)
 
 instance Show Object where
-    show (Object (Class n _) _) = "<" <> unpack n <> " instance>"
+    show (Object cls _) = "<" <> unpack (className cls) <> " instance>"
 
 instance Ord Object where
     (Object n _) `compare` (Object n' _) = n `compare` n'
 
 instance Eq Class where
-    (Class a _) == (Class b _) = a == b
+    a == b = className a == className b
 
 instance Ord Class where
-    (Class a _) `compare` (Class b _) = a `compare` b
+    a `compare` b = className a `compare` className b
 
 data BinaryOp = Equals
               | NotEquals

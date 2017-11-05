@@ -60,7 +60,7 @@ data Token =
 reservedWords :: HS.HashSet Text
 reservedWords = HS.fromList
     ["and", "or", "if", "then", "else", "false", "true"
-    ,"class", "fun", "super", "this"
+    ,"class", "fun", "super", "this", "static"
     ,"let"
     ,"print", "return"
     ,"while", "for", "break", "continue"

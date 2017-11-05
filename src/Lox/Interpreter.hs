@@ -4,20 +4,22 @@
 
 module Lox.Interpreter where
 
-import Data.IORef
-import Control.Arrow (second)
 import Control.Applicative
+import Control.Arrow (second)
+import Control.Monad.Except
+import Control.Monad.State.Strict
+import Control.Monad (when)
 import Data.Char (toLower)
 import Data.HashMap.Strict (HashMap)
-import qualified Data.HashSet as HS
-import qualified Data.HashMap.Strict as HM
-import Control.Monad.State.Strict
-import Control.Monad.Except
-import Data.Monoid
+import Data.IORef
+import Data.Maybe
 import Data.Maybe (isJust)
+import Data.Monoid
 import Data.Text (Text)
-import System.Clock
 import Data.Traversable
+import System.Clock
+import qualified Data.HashMap.Strict as HM
+import qualified Data.HashSet as HS
 import qualified Data.List as L
 import qualified Data.Text as T
 
@@ -78,9 +80,11 @@ exec (Print _ e) = do v <- eval e
                       printLox v
                       return LoxNil
 exec (ExprS e) = eval e
+
 exec (DefineFn loc v ns body) = do
     exec (Declare loc v) -- functions can recurse, so declare before define
     eval (Assign loc (LVar v) (Lambda loc ns body))
+
 exec (Define loc v e) = do
     isBound <- gets (inCurrentScope v . bindings)
     when isBound $ 
@@ -89,17 +93,30 @@ exec (Define loc v e) = do
     exec (Declare loc v)
     gets bindings >>= liftIO . assign v x
     return x
+
 exec (Declare _ v) = do
     env <- gets bindings >>= liftIO . declare v
     modify' $ \s -> s { bindings = env }
     return LoxNil
+
 exec (ClassDecl loc name methods) = do
     exec (Declare loc name)
     env <- gets bindings
-    let ms = HM.fromList [(nm, Function args body env) | (nm, args, body) <- methods]
-        cls = Class name ms
-    liftIO $ assign name (LoxClass cls) env
-    return (LoxClass cls)
+
+    let constructors = [ Function args body env | (Constructor args body) <- methods]
+        statics      = [(n, Function as b env)  | (StaticMethod n as b) <- methods]
+        instances    = [(n, Function as b env)  | (InstanceMethod n as b) <- methods]
+
+    -- verify constructors
+    constructor <- case constructors of
+                        [] -> return Nothing
+                        [c] -> return $ Just c
+                        _ -> loxError loc $ "Multiple constructors declared for " <> T.unpack name
+
+    let cls = LoxClass $ Class name constructor (HM.fromList statics) (HM.fromList instances)
+    liftIO $ assign name cls env
+    return cls
+
 exec (Block _ sts) = do
     env <- gets bindings
     modify' $ \s -> s { bindings = enterScope (bindings s) }
@@ -140,10 +157,10 @@ eval (GetField loc e field) = do
       _ -> loxError loc $ "Cannot access field of " <> typeOf inst
     where
         fieldNotFound = throwError $ FieldNotFound loc field
-        getMethod (Class _ meths) inst env = do
-            case HM.lookup field meths of
+        getMethod cls inst env = do
+            case HM.lookup field (methods cls) of
               Nothing -> fieldNotFound
-              Just fn -> bind [("this", inst)] fn
+              Just fn -> LoxFn <$> bind [("this", inst)] fn
 
 eval (Literal _ a) = pure a
 
@@ -224,19 +241,28 @@ eval (Call loc callee args) = do
 
 instantiate :: SourceLocation -> Class -> [Atom] -> LoxT Atom
 instantiate loc cls args = do
-    construct <- getConstructor cls (length args)
-    flds <- (liftIO . newIORef) =<< construct args
-    return (LoxObj $ Object cls flds)
+    obj       <- liftIO (new cls)
+    construct obj args
+    return (LoxObj $ obj)
     where
-        getConstructor _ 0 = return (\[] -> return HM.empty)
-        getConstructor _ _ = loxError loc $ "Cannot find constructor"
+        construct = case initializer cls of
+            Nothing -> defaultConstr
+            Just fn -> (\o args -> do bound <- bind [("this", LoxObj o)] fn
+                                      apply loc bound args
+                                      return ())
+                                          
+        wrongArity n = loxError loc $ "Wrong number of arguments. Expected " <> show n
+        defaultConstr _ args = when (not $ null args) $ wrongArity 0
 
-bind :: [(VarName, Atom)] -> Callable -> LoxT Atom
+new :: Class -> IO Object
+new cls = Object cls <$> newIORef HM.empty
+
+bind :: [(VarName, Atom)] -> Callable -> LoxT Callable
 bind xs (BuiltIn _ _) = loxError Unlocated "Cannot bind native functions, yet"
-bind xs (Function ns body env) = LoxFn . Function ns body <$> liftIO (enterScopeWith xs env)
+bind xs (Function ns body env) = Function ns body <$> liftIO (enterScopeWith xs env)
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
-apply loc fn args | arity fn /= length args = throwError (LoxError loc msg)
+apply loc fn args | arity fn /= length args = loxError loc msg
     where
         msg = concat ["Wrong number of arguments. "
                      , show (arity fn)
@@ -312,12 +338,12 @@ stringify (LoxBool b) = return $ fmap toLower (show b)
 stringify (LoxNum n) = return $
     let s = show n in if isInteger n then takeWhile (/= '.') s else s
 stringify (LoxFn fn) = return "<function>"
-stringify (LoxClass (Class nm _)) = return $ "<class " <> T.unpack nm <> ">"
-stringify (LoxObj (Object (Class n _) flds)) = do
+stringify (LoxClass cls) = return $ "<class " <> T.unpack (className cls) <> ">"
+stringify (LoxObj (Object cls flds)) = do
     fs <- HM.toList <$> liftIO (readIORef flds)
     fs' <- mapM (sequence . second stringify) fs
     return $ concat
-           $ ["<", T.unpack n, " "]
+           $ ["<", T.unpack (className cls), " "]
              ++ L.intersperse " " [T.unpack k <> "=" <> v | (k, v) <- fs']
              ++ [">"]
 

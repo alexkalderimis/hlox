@@ -81,10 +81,19 @@ classDeclaration = do
     methods <- many (method <* skipWhile (== SEMICOLON))
     expect RIGHT_BRACE
     end <- loc
+
     return (ClassDecl (start :..: end) className methods)
 
-method :: Parser (VarName, [VarName], Statement)
-method = withinMethod $ (,,) <$> identifier <*> arguments <*> functionBody EQUAL
+method :: Parser Method
+method = constructor <|> staticMethod <|> instanceMethod
+    where
+      constructor = do IDENTIFIER "init" <- next
+                       Constructor <$> arguments <*> thisAllowed blockStatement
+      staticMethod = do keyword "static"
+                        instanceMethod
+      instanceMethod = InstanceMethod <$> identifier
+                                      <*> arguments
+                                      <*> thisAllowed (functionBody EQUAL)
 
 functionDefinition :: Parser Statement
 functionDefinition = do
@@ -415,8 +424,8 @@ is f = Parser $ \s -> (Right (f s), s)
 loc :: Parser SourceLocation
 loc = is location
 
-withinMethod :: Parser a -> Parser a
-withinMethod pa = do
+thisAllowed :: Parser a -> Parser a
+thisAllowed pa = do
     b <- is inMethod
     set True
     a <- pa
