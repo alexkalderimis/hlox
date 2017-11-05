@@ -1,0 +1,17 @@
+class Math {
+
+  static sqr(n) = n * n
+
+  static exp(n, e) {
+    let v = n
+    while (e > 0) {
+      v = v * n
+      e = e - 1
+    }
+    return v
+  }
+}
+
+print "Square of 17 = " + Math.sqr(17)
+print "Highest 32 bit value is " + Math.exp(2, 32)
+

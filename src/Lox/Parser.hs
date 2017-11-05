@@ -90,7 +90,9 @@ method = constructor <|> staticMethod <|> instanceMethod
       constructor = do IDENTIFIER "init" <- next
                        Constructor <$> arguments <*> thisAllowed blockStatement
       staticMethod = do keyword "static"
-                        instanceMethod
+                        StaticMethod <$> identifier
+                                     <*> arguments
+                                     <*> functionBody EQUAL
       instanceMethod = InstanceMethod <$> identifier
                                       <*> arguments
                                       <*> thisAllowed (functionBody EQUAL)
@@ -363,7 +365,7 @@ atom = ident <|> p <|> group <|> fail "expected an expression"
             l <- loc
             a <- case t of
                 STRING s -> return $ LoxString  s
-                NUMBER n -> return $ LoxNum n
+                NUMBER n -> return $ LoxNum (realToFrac n)
                 KEYWORD kw -> case kw of
                                 "true" -> return $ LoxBool True
                                 "false" -> return $ LoxBool False

@@ -13,6 +13,7 @@ import Data.Text hiding (length, reverse)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import Lox.Environment (Environment)
+import Data.Fixed
 
 type VarName = Text
 type Env = Environment VarName Atom
@@ -117,7 +118,7 @@ instance Eq Callable where
 
 data Atom = LoxNil
           | LoxBool Bool
-          | LoxNum Double
+          | LoxNum Nano
           | LoxString Text
           | LoxFn Callable
           | LoxClass Class

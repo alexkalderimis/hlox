@@ -4,6 +4,7 @@
 
 module Lox.Interpreter where
 
+import Data.Fixed
 import Control.Applicative
 import Control.Arrow (second)
 import Control.Monad.Except
@@ -149,6 +150,8 @@ eval (Lambda _ args body) = LoxFn . Function args body <$> gets bindings
 eval (GetField loc e field) = do
     inst <- eval e
     case inst of
+      (LoxClass cls) | field == "name" -> return (LoxString $ className cls)
+      (LoxClass cls) | Just sm <- HM.lookup field (staticMethods cls) -> return (LoxFn sm)
       (LoxObj (Object cls fs)) -> do
           hm <- liftIO (readIORef fs)
           case HM.lookup field hm of
@@ -325,7 +328,7 @@ addAtoms (LoxString a) b = do s <- T.pack <$> stringify b
                               return $ LoxString (a <> s)
 addAtoms a b = throw' ("Cannot add: " <> show a <> " and " <> show b)
 
-numericalFn :: String -> (Double -> Double -> Double) -> BinaryFn
+numericalFn :: String -> (Nano -> Nano -> Nano) -> BinaryFn
 numericalFn _ f (LoxNum a) (LoxNum b) = return $ LoxNum (f a b)
 numericalFn name _ a b = throw' $ concat [ "Cannot ", name, ": "
                                          , show a, " and ", show b
@@ -335,8 +338,7 @@ stringify :: Atom -> LoxT String
 stringify LoxNil = return "nil"
 stringify (LoxString t) = return $ T.unpack t
 stringify (LoxBool b) = return $ fmap toLower (show b)
-stringify (LoxNum n) = return $
-    let s = show n in if isInteger n then takeWhile (/= '.') s else s
+stringify (LoxNum n) = return $ showFixed True n
 stringify (LoxFn fn) = return "<function>"
 stringify (LoxClass cls) = return $ "<class " <> T.unpack (className cls) <> ">"
 stringify (LoxObj (Object cls flds)) = do
