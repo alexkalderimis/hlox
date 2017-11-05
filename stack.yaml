@@ -1,0 +1,37 @@
+# For more information, see: https://github.com/commercialhaskell/stack/blob/release/doc/yaml_configuration.md
+
+# Specifies the GHC version and set of packages available (e.g., lts-3.5, nightly-2015-09-21, ghc-7.10.2)
+resolver: lts-9.8
+
+# Local packages, usually specified by relative directory name
+packages:
+- '.'
+
+# Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
+extra-deps: []
+
+# Override default flag values for local packages and extra-deps
+flags: {}
+
+# Extra package databases containing global packages
+extra-package-dbs: []
+
+# Control whether we use the GHC we find on the path
+# system-ghc: true
+
+# Require a specific version of stack, using version ranges
+# require-stack-version: -any # Default
+# require-stack-version: >= 1.0.0
+
+# Override the architecture used by stack, especially useful on Windows
+# arch: i386
+# arch: x86_64
+
+
+# Readline is required for the repl, install with brew and then use
+# brew info to see the install directories
+#  LDFLAGS:  -L/usr/local/opt/readline/lib
+#  CPPFLAGS: -I/usr/local/opt/readline/include
+# Extra directories used by stack for building
+extra-include-dirs: ['/usr/local/opt/readline/include']
+extra-lib-dirs: ['/usr/local/opt/readline/lib']

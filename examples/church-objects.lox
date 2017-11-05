@@ -1,0 +1,27 @@
+fun makePoint(x, y) {
+  fun closure(method) {
+    if (method == "x") return x;
+    if (method == "y") return y;
+    if (method == "incy") {
+        y = y + 1;
+        return;
+    }
+    if (method == "sum") {
+        return x + y;
+    }
+    print "unknown method " + method;
+  }
+
+  return closure;
+}
+
+let point = makePoint(2, 3);
+let point2 = makePoint(10, 20);
+print point("x"); // "2".
+print point("y"); // "3".
+print point("sum"); // 5
+point("incy");
+print point("y"); // 4
+print point("sum"); // 6
+print point("sum") + point2("sum"); // 36
+
