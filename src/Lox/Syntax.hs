@@ -34,6 +34,13 @@ type Program = [Statement]
 class Located a where
     sourceLoc :: a -> SourceLocation
 
+data LoxExecption = LoxError SourceLocation String
+                  | FieldNotFound SourceLocation VarName
+                  | LoxReturn SourceLocation Atom
+                  | LoxBreak SourceLocation
+                  | LoxContinue SourceLocation
+                  deriving (Show)
+
 data Statement = While SourceLocation Expr Statement
                | DefineFn SourceLocation VarName [VarName] Statement
                | Define SourceLocation VarName Expr
@@ -104,14 +111,16 @@ instance Located Expr where
     sourceLoc (Array loc _) = loc
 
 -- Native function that supports errors and IO
-type NativeFn = [Atom] -> IO (Either String Atom)
+type NativeFn = [Atom] -> IO (Either LoxExecption Atom)
 
 data Callable = Function [VarName] Statement Env
               | BuiltIn Int NativeFn
+              | BuiltInMethod Int NativeFn
 
 arity :: Callable -> Int
 arity (Function args _ _) = length args
 arity (BuiltIn i _) = i
+arity (BuiltInMethod i _) = i
 
 instance Show Callable where
     show (Function args body _) = "(Function " <> show args

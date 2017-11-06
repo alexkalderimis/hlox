@@ -48,13 +48,6 @@ data Interpreter = Interpreter
 interpreter :: Env -> Interpreter
 interpreter env = Interpreter env mempty False 0
 
-data LoxExecption = LoxError SourceLocation String
-                  | FieldNotFound SourceLocation VarName
-                  | LoxReturn SourceLocation Atom
-                  | LoxBreak SourceLocation
-                  | LoxContinue SourceLocation
-                  deriving (Show)
-
 -- we require two effects in the interpreter:
 -- * statefulness of the bindings
 -- * exception handing
@@ -231,6 +224,7 @@ eval (GetField loc e field) = do
           case HM.lookup field hm of
             Nothing -> gets bindings >>= getMethod objectClass inst
             Just v -> return v
+      (LoxArray arr) -> gets bindings >>= getMethod arrayClass inst
       _ -> loxError loc $ "Cannot access field of " <> typeOf inst
     where
         fieldNotFound = throwError $ FieldNotFound (simplify loc) field
@@ -285,12 +279,9 @@ eval (Binary Or x y) = do
 eval b@(Binary op x y) = do
     case HM.lookup op binaryFns of
         Nothing -> loxError (sourceLoc b) $ "Unknown operator: " <> show op
-        Just f  -> do a <- eval x
-                      b <- eval y
-                      f a b `catchError` locateError
-
-    where locateError (LoxError Unlocated e) = loxError (sourceLoc b) e
-          locateError e                      = throwError e
+        Just f  -> do a' <- eval x
+                      b' <- eval y
+                      f a' b' `catchError` locateError (sourceLoc b)
 
 eval (IfThenElse _ p x y) = do
     b <- truthy <$> eval p
@@ -392,8 +383,9 @@ new :: Int -> Class -> IO Object
 new i cls = Object i cls <$> newIORef HM.empty
 
 bind :: [(VarName, Atom)] -> Callable -> LoxT Callable
-bind xs (BuiltIn _ _) = loxError Unlocated "Cannot bind native functions, yet"
 bind xs (Function ns body env) = Function ns body <$> liftIO (enterScopeWith xs env)
+bind [("this", this)] (BuiltInMethod n fn) = return $ BuiltIn n (\args -> fn (this : args))
+bind _ fn = return fn
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
 apply loc fn args | arity fn /= length args = loxError loc msg
@@ -404,7 +396,11 @@ apply loc fn args | arity fn /= length args = loxError loc msg
                      ]
 
 apply loc (BuiltIn _ fn) args = liftIO (fn args)
-                              >>= either (throwError . LoxError loc) return 
+                                >>= either (locateError loc) return 
+
+apply loc (BuiltInMethod _ fn) args = do this <- eval (Var loc "this")
+                                         ret <- liftIO (fn (this:args))
+                                         either (locateError loc) return ret
 
 apply _ (Function names body env) args = do
    old <- gets bindings
@@ -429,15 +425,48 @@ warn loc msg = modify' $ \s -> s { warnings = HS.insert (locS <> msg) (warnings 
                          ]
 
 builtins :: IO Env
-builtins = enterScopeWith vals mempty
+builtins = do
+    math <- Object (succ $ classId baseClass) baseClass
+                <$> newIORef (HM.fromList maths)
+
+    enterScopeWith (("Math", LoxObj math) : vals) mempty
+
     where vals = [("clock", LoxFn (BuiltIn 0 clock))
                  ,("Object", LoxClass baseClass)
                  ]
 
 baseClass :: Class
 baseClass = emptyClass { className = "Object"
+                       , classId = (-1000)
                        , staticMethods = HM.fromList [("keys", (BuiltIn 1 objectKeys))]
                        }
+
+arrayClass :: Class
+arrayClass = baseClass { className = "Array"
+                       , classId = (-1001)
+                       , methods = HM.fromList methods
+                       }
+    where
+        methods = [("map", BuiltInMethod 1
+                           (\[vs, f] -> case (vs, f) of
+                                          (LoxArray arr, LoxFn fn) -> do
+                                              let s = interpreter mempty
+                                                  f a = apply Unlocated fn [a]
+                                              vs <- readArray arr
+                                              let lox = do vs' <- sequence $ fmap f vs
+                                                           arr' <- liftIO (newIORef vs')
+                                                           return $ LoxArray (AtomArray arr')
+                                              runLoxT lox s
+                                          _ -> return (Left $ LoxError Unlocated "bad args")))]
+
+maths :: [(VarName, Atom)]
+maths = [("pi", LoxNum $ realToFrac pi)
+        ,("sin", LoxFn (BuiltIn 1 (mathsFn sin)))
+        ,("cos", LoxFn (BuiltIn 1 (mathsFn cos)))
+        ,("tan", LoxFn (BuiltIn 1 (mathsFn tan)))
+        ]
+    where mathsFn f [LoxNum n] = return (Right $ LoxNum $ realToFrac $ f $ realToFrac n)
+          mathsFn _ [a] = return (Left $ LoxError Unlocated $ "Required num, got: " <> typeOf a)
 
 clock :: NativeFn
 clock _ = fmap (Right . LoxNum . (/ 1e9) . realToFrac . toNanoSecs)
@@ -449,7 +478,7 @@ objectKeys [LoxObj Object{..}] = do
     vs <- newIORef (V.fromList $ fmap LoxString $ HM.keys hm)
     return (Right $ LoxArray $ AtomArray $ vs)
 objectKeys [x] = do
-    return (Left $ "Cannot read keys of " <> typeOf x)
+    return (Left $ LoxError Unlocated $ "Cannot read keys of " <> typeOf x)
 
 truthy :: Atom -> Bool
 truthy LoxNil      = False
@@ -571,3 +600,8 @@ nextId :: LoxT Int
 nextId = do c <- gets currentId
             modify' $ \s -> s { currentId = succ c }
             return c
+
+locateError :: SourceLocation -> LoxExecption -> LoxT a
+locateError loc (LoxError Unlocated e) = loxError loc e
+locateError _  e                      = throwError e
+
