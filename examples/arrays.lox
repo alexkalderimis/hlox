@@ -8,6 +8,11 @@ for (x in xs) {
     print x + "!"
 }
 
+print xs
+xs[1] = 1000
+xs[10] = "wibble"
+print xs
+
 class Map {}
 
 let m = Map()
@@ -17,4 +22,10 @@ m.key2 = 3
 
 print m["key0"]
 print m["notthere"] // nil
+
+let map = Map()
+for (kv in [["a", 1], ["b", 2], ["c", 3]]) {
+    map[kv[0]] = kv[1]
+}
+print map
 

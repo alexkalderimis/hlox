@@ -194,7 +194,8 @@ data Stepper = forall a. Stepper a (a -> LoxT (Maybe Atom, a))
 
 iteratee :: SourceLocation -> Atom -> LoxT Stepper
 
-iteratee loc (LoxArray vs) = do
+iteratee loc (LoxArray (AtomArray ref)) = do
+    vs <- liftIO $ readIORef ref
     let seed   = (0 :: Int)
         next i = return (vs !? i, succ i)
     return $ Stepper seed next
@@ -240,7 +241,9 @@ eval (Index loc e ei) = do
     o <- eval e
     i <- eval ei
     case (o, i) of
-      (LoxArray vs, LoxNum n) -> return $ fromMaybe LoxNil (vs !? floor n)
+      (LoxArray (AtomArray r), LoxNum n) -> do
+          vs <- liftIO $ readIORef r
+          return $ fromMaybe LoxNil (vs !? floor n)
       (LoxObj _, LoxString k) -> eval (GetField loc (Literal (sourceLoc e) $ o) k)
                                  `catchError` \e -> case e of
                                                       (FieldNotFound{}) -> return LoxNil
@@ -308,6 +311,33 @@ eval (Assign loc (LVar v) e) = do
         else return x
     where undeclared = loxError loc $ "Cannot set undeclared variable: " <> show v
 
+eval (Assign loc (SetIdx lhs idx) e) = do
+    target <- eval lhs
+    k <- eval idx
+    v <- eval e
+    case (target, k) of
+      -- no attempts are made to optimise the representation of sparse arrays
+      -- thus assigning to very large indices will result in the allocation of
+      -- large very sparse arrays
+      (LoxArray (AtomArray r), LoxNum n) -> do
+          let i = floor n
+          vs <- liftIO (readIORef r)
+          let vs' = if i < V.length vs
+                    then vs
+                    else let needed = i - V.length vs + 1
+                         in vs <> V.replicate needed LoxNil
+          liftIO $ writeIORef r (vs' V.// [(i, v)])
+          return v
+      -- basic object field setting
+      (LoxObj (Object _ fs), LoxString k) -> assignField fs k v >> return v
+      -- everything else is a failure
+      _ -> do idx <- stringify k
+              loxError loc $ unwords ["Cannot assign", typeOf v
+                                     ,"to a", typeOf target
+                                     ,"at", idx
+                                     ]
+    where assignField fs k v = liftIO (modifyIORef fs (HM.insert k v))
+
 eval (Assign loc (Set lhs fld) e) = do
     v <- eval e
     o <- eval lhs
@@ -330,7 +360,8 @@ eval (Call loc callee args) = do
 
 eval (Array loc exprs) = do
     as <- V.fromList <$> mapM eval exprs
-    return (LoxArray as)
+    r <- liftIO $ newIORef as
+    return (LoxArray (AtomArray r))
 
 init :: SourceLocation -> Object -> [Atom] -> LoxT ()
 init loc obj@(Object cls _) args = construct obj args
@@ -394,11 +425,29 @@ warn loc msg = modify' $ \s -> s { warnings = HS.insert (locS <> msg) (warnings 
 
 builtins :: IO Env
 builtins = enterScopeWith vals mempty
-    where vals = [("clock", LoxFn (BuiltIn 0 clock))]
+    where vals = [("clock", LoxFn (BuiltIn 0 clock))
+                 ,("Object", LoxClass baseClass)
+                 ]
+
+emptyClass :: Class
+emptyClass = Class "" Nothing Nothing mempty mempty
+
+baseClass :: Class
+baseClass = emptyClass { className = "Object"
+                       , staticMethods = HM.fromList [("keys", (BuiltIn 1 objectKeys))]
+                       }
 
 clock :: NativeFn
 clock _ = fmap (Right . LoxNum . (/ 1e9) . realToFrac . toNanoSecs)
         $ getTime Realtime
+
+objectKeys :: NativeFn
+objectKeys [LoxObj (Object _ fs)] = do
+    hm <- liftIO $ readIORef fs
+    vs <- newIORef (V.fromList $ fmap LoxString $ HM.keys hm)
+    return (Right $ LoxArray $ AtomArray $ vs)
+objectKeys [x] = do
+    return (Left $ "Cannot read keys of " <> typeOf x)
 
 truthy :: Atom -> Bool
 truthy LoxNil      = False
@@ -443,6 +492,13 @@ stringify (LoxObj (Object cls flds)) = do
            $ ["<", T.unpack (className cls), " "]
              ++ L.intersperse " " [T.unpack k <> "=" <> v | (k, v) <- fs']
              ++ [">"]
+stringify (LoxArray (AtomArray rvs)) = do
+    vs <- liftIO (readIORef rvs)
+    es <- V.toList . fmap (\s -> '"' : s <> "\"") <$> mapM stringify vs
+    return $ concat [ "["
+                    , L.intercalate ", " es
+                    , "]"
+                    ]
 
 isInteger :: Double -> Bool
 isInteger d = d == fromInteger (floor d)

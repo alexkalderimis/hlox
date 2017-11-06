@@ -70,6 +70,7 @@ instance Located Statement where
 
 data LVal = LVar VarName
           | Set Expr VarName
+          | SetIdx Expr Expr
           deriving (Show, Eq)
 
 data Expr = Literal SourceLocation Atom
@@ -130,8 +131,20 @@ data Atom = LoxNil
           | LoxFn Callable
           | LoxClass Class
           | LoxObj Object 
-          | LoxArray (Vector Atom)
+          | LoxArray AtomArray
           deriving (Ord, Show, Eq)
+
+newtype AtomArray = AtomArray (IORef (Vector Atom))
+
+-- TODO: atoms clearly cannot all be Ords and Eqs
+instance Show AtomArray where
+    show a = "AtomArray"
+
+instance Eq AtomArray where
+    a == b = False
+
+instance Ord AtomArray where
+    a `compare` b = EQ
 
 type Methods = HM.HashMap VarName Callable
 

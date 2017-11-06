@@ -288,6 +288,7 @@ assignment = do
             lhs <- call
             case lhs of
               (GetField loc e name) -> return (Set e name)
+              (Index loc e idx) -> return (SetIdx e idx)
               (Var loc name) -> return (LVar name)
               _ -> empty
 
