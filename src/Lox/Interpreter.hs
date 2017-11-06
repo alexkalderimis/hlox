@@ -433,6 +433,7 @@ builtins = do
 
     where vals = [("clock", LoxFn (BuiltIn 0 clock))
                  ,("Object", LoxClass baseClass)
+                 ,("Array", LoxClass arrayClass)
                  ]
 
 baseClass :: Class
@@ -445,8 +446,17 @@ arrayClass :: Class
 arrayClass = baseClass { className = "Array"
                        , classId = (-1001)
                        , methods = HM.fromList methods
+                       , staticMethods = HM.fromList statics
                        }
     where
+        statics = [("range", BuiltIn 2
+                             (\[from, to] -> case (from, to) of
+                                               (LoxNum a, LoxNum b) -> do
+                                                   let vs = fmap LoxNum $ V.enumFromN a (floor b - floor a)
+                                                   Right . LoxArray . AtomArray <$> newIORef vs
+                                               _ -> return (Left $ LoxError Unlocated "bad args")))
+                  ]
+
         methods = [("map", BuiltInMethod 1
                            (\[vs, f] -> case (vs, f) of
                                           (LoxArray arr, LoxFn fn) -> do
@@ -525,11 +535,15 @@ stringify (LoxObj Object{..}) = do
              ++ [">"]
 stringify (LoxArray arr) = do
     vs <- readArray arr
-    es <- V.toList . fmap (\s -> '"' : s <> "\"") <$> mapM stringify vs
+    es <- V.toList <$> mapM quoteString vs
     return $ concat [ "["
                     , L.intercalate ", " es
                     , "]"
                     ]
+
+quoteString :: Atom -> LoxT String
+quoteString s@LoxString{} = fmap (\s -> '"' : s <> "\"") (stringify s)
+quoteString a = stringify a
 
 isInteger :: Double -> Bool
 isInteger d = d == fromInteger (floor d)
