@@ -83,6 +83,7 @@ data Expr = Literal SourceLocation Atom
           | Call SourceLocation Expr [Expr]
           | Lambda SourceLocation [VarName] Statement
           | GetField SourceLocation Expr VarName
+          | Index SourceLocation Expr Expr
           | Array SourceLocation [Expr]
           deriving (Show, Eq)
 
@@ -98,6 +99,7 @@ instance Located Expr where
     sourceLoc (Call loc _ _) = loc
     sourceLoc (Lambda loc _ _) = loc
     sourceLoc (GetField loc _ _) = loc
+    sourceLoc (Index loc _ _) = loc
     sourceLoc (Array loc _) = loc
 
 -- Native function that supports errors and IO

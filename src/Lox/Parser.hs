@@ -337,9 +337,14 @@ unary = p <|> fnExpr <|> call <|> atom
 call :: Parser Expr
 call = atom >>= finishCall
   where finishCall e = do
-          mp <- optional (anyOf [DOT, LEFT_PAREN])
+          mp <- optional (anyOf [DOT, LEFT_SQUARE, LEFT_PAREN])
           case mp of
             Nothing -> return e
+            Just LEFT_SQUARE -> do
+                idx <- expression
+                expect RIGHT_SQUARE
+                end <- loc
+                finishCall $ Index (sourceLoc e :..: end) e idx
             Just LEFT_PAREN  -> do
                 args <- manySepBy COMMA assignment <* expect RIGHT_PAREN
                 end <- loc

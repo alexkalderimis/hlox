@@ -236,6 +236,17 @@ eval (GetField loc e field) = do
                            Just sup -> getMethod sup inst env
               Just fn -> LoxFn <$> bind [("this", inst)] fn
 
+eval (Index loc e ei) = do
+    o <- eval e
+    i <- eval ei
+    case (o, i) of
+      (LoxArray vs, LoxNum n) -> return $ fromMaybe LoxNil (vs !? floor n)
+      (LoxObj _, LoxString k) -> eval (GetField loc (Literal (sourceLoc e) $ o) k)
+                                 `catchError` \e -> case e of
+                                                      (FieldNotFound{}) -> return LoxNil
+                                                      e -> throwError e
+      _                       -> loxError loc $ "Cannot index " <> typeOf o <> " with " <> typeOf i
+
 eval (Literal _ a) = pure a
 
 eval (Grouping _ e) = eval e
