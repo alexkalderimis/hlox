@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Lox.Interpreter where
 
@@ -41,17 +42,18 @@ data Interpreter = Interpreter
     { bindings :: !Env
     , warnings :: !(HS.HashSet Text)
     , initialising :: !Bool
+    , currentId :: !Int
     }
 
 interpreter :: Env -> Interpreter
-interpreter env = Interpreter env mempty False
+interpreter env = Interpreter env mempty False 0
 
 data LoxExecption = LoxError SourceLocation String
                   | FieldNotFound SourceLocation VarName
                   | LoxReturn SourceLocation Atom
                   | LoxBreak SourceLocation
                   | LoxContinue SourceLocation
-                  deriving (Show, Eq)
+                  deriving (Show)
 
 -- we require two effects in the interpreter:
 -- * statefulness of the bindings
@@ -114,6 +116,7 @@ exec (ClassDecl loc name msuper methods) = do
     exec (Declare loc name)
     env <- gets bindings
     parent <- sequence $ fmap (findSuperClass env) msuper
+    classId <- nextId
 
     let constructors = [ Function args body env | (Constructor args body) <- methods]
         statics      = [(n, Function as b env)  | (StaticMethod n as b) <- methods]
@@ -125,7 +128,8 @@ exec (ClassDecl loc name msuper methods) = do
                      [c] -> return $ Just c
                      _   -> loxError loc $ "Multiple constructors declared for " <> T.unpack name
 
-    let cls = LoxClass $ Class { className = name
+    let cls = LoxClass $ Class { classId = classId
+                               , className = name
                                , superClass = parent
                                , initializer = constructor
                                , staticMethods = (HM.fromList statics)
@@ -194,14 +198,14 @@ data Stepper = forall a. Stepper a (a -> LoxT (Maybe Atom, a))
 
 iteratee :: SourceLocation -> Atom -> LoxT Stepper
 
-iteratee loc (LoxArray (AtomArray ref)) = do
-    vs <- liftIO $ readIORef ref
+iteratee loc (LoxArray arr) = do
+    vs <- readArray arr
     let seed   = (0 :: Int)
         next i = return (vs !? i, succ i)
     return $ Stepper seed next
 
-iteratee loc (LoxObj (Object _ fs)) = do
-    keys <- fmap LoxString . HM.keys <$> liftIO (readIORef fs)
+iteratee loc (LoxObj Object{..}) = do
+    keys <- fmap LoxString . HM.keys <$> liftIO (readIORef objectFields)
     let next []     = return (Nothing, [])
         next (k:ks) = return (Just k, ks)
     return $ Stepper keys next
@@ -217,15 +221,15 @@ eval (GetField loc e field) = do
     case inst of
       (LoxClass cls) | field == "name" -> return (LoxString $ className cls)
       (LoxClass cls) | Just sm <- HM.lookup field (staticMethods cls) -> return (LoxFn sm)
-      (LoxObj (Object cls _)) | field == "class" -> return (LoxClass cls)
-      (LoxObj (Object cls fs)) | field == "super" -> do
-          case superClass cls of
+      (LoxObj Object{..}) | field == "class" -> return (LoxClass objectClass)
+      (LoxObj obj) | field == "super" -> do
+          case superClass (objectClass obj) of
             Nothing -> loxError loc "No super-class"
-            Just sup -> return (LoxObj (Object sup fs))
-      (LoxObj (Object cls fs)) -> do
-          hm <- liftIO (readIORef fs)
+            Just sup -> return (LoxObj obj{ objectClass = sup })
+      (LoxObj Object{..}) -> do
+          hm <- liftIO (readIORef objectFields)
           case HM.lookup field hm of
-            Nothing -> gets bindings >>= getMethod cls inst
+            Nothing -> gets bindings >>= getMethod objectClass inst
             Just v -> return v
       _ -> loxError loc $ "Cannot access field of " <> typeOf inst
     where
@@ -241,8 +245,8 @@ eval (Index loc e ei) = do
     o <- eval e
     i <- eval ei
     case (o, i) of
-      (LoxArray (AtomArray r), LoxNum n) -> do
-          vs <- liftIO $ readIORef r
+      (LoxArray arr, LoxNum n) -> do
+          vs <- readArray arr
           return $ fromMaybe LoxNil (vs !? floor n)
       (LoxObj _, LoxString k) -> eval (GetField loc (Literal (sourceLoc e) $ o) k)
                                  `catchError` \e -> case e of
@@ -319,17 +323,17 @@ eval (Assign loc (SetIdx lhs idx) e) = do
       -- no attempts are made to optimise the representation of sparse arrays
       -- thus assigning to very large indices will result in the allocation of
       -- large very sparse arrays
-      (LoxArray (AtomArray r), LoxNum n) -> do
+      (LoxArray arr, LoxNum n) -> do
           let i = floor n
-          vs <- liftIO (readIORef r)
+          vs <- readArray arr
           let vs' = if i < V.length vs
                     then vs
                     else let needed = i - V.length vs + 1
                          in vs <> V.replicate needed LoxNil
-          liftIO $ writeIORef r (vs' V.// [(i, v)])
+          liftIO $ writeIORef (unArray arr) (vs' V.// [(i, v)])
           return v
       -- basic object field setting
-      (LoxObj (Object _ fs), LoxString k) -> assignField fs k v >> return v
+      (LoxObj Object{objectFields = fs}, LoxString k) -> assignField fs k v >> return v
       -- everything else is a failure
       _ -> do idx <- stringify k
               loxError loc $ unwords ["Cannot assign", typeOf v
@@ -342,7 +346,7 @@ eval (Assign loc (Set lhs fld) e) = do
     v <- eval e
     o <- eval lhs
     case o of
-      LoxObj (Object _ fs) -> assignField fs v >> return v
+      LoxObj Object{objectFields=fs} -> assignField fs v >> return v
       _                    -> loxError loc ("Cannot assign to " <> typeOf o)
     where
         assignField fs v = liftIO (modifyIORef fs (HM.insert fld v))
@@ -364,9 +368,9 @@ eval (Array loc exprs) = do
     return (LoxArray (AtomArray r))
 
 init :: SourceLocation -> Object -> [Atom] -> LoxT ()
-init loc obj@(Object cls _) args = construct obj args
+init loc obj args = construct obj args
     where
-        construct = case initializer cls of
+        construct = case initializer (objectClass obj) of
             Nothing -> defaultConstr
             Just fn -> (\o args -> do bound <- bind [("this", LoxObj o)] fn
                                       apply loc bound args
@@ -379,12 +383,13 @@ init loc obj@(Object cls _) args = construct obj args
 
 instantiate :: SourceLocation -> Class -> [Atom] -> LoxT Atom
 instantiate loc cls args = do
-    obj     <- liftIO (new cls)
+    objId <- nextId
+    obj   <- liftIO (new objId cls)
     initialise (init loc obj args)
     return (LoxObj $ obj)
 
-new :: Class -> IO Object
-new cls = Object cls <$> newIORef HM.empty
+new :: Int -> Class -> IO Object
+new i cls = Object i cls <$> newIORef HM.empty
 
 bind :: [(VarName, Atom)] -> Callable -> LoxT Callable
 bind xs (BuiltIn _ _) = loxError Unlocated "Cannot bind native functions, yet"
@@ -429,9 +434,6 @@ builtins = enterScopeWith vals mempty
                  ,("Object", LoxClass baseClass)
                  ]
 
-emptyClass :: Class
-emptyClass = Class "" Nothing Nothing mempty mempty
-
 baseClass :: Class
 baseClass = emptyClass { className = "Object"
                        , staticMethods = HM.fromList [("keys", (BuiltIn 1 objectKeys))]
@@ -442,8 +444,8 @@ clock _ = fmap (Right . LoxNum . (/ 1e9) . realToFrac . toNanoSecs)
         $ getTime Realtime
 
 objectKeys :: NativeFn
-objectKeys [LoxObj (Object _ fs)] = do
-    hm <- liftIO $ readIORef fs
+objectKeys [LoxObj Object{..}] = do
+    hm <- liftIO $ readIORef objectFields
     vs <- newIORef (V.fromList $ fmap LoxString $ HM.keys hm)
     return (Right $ LoxArray $ AtomArray $ vs)
 objectKeys [x] = do
@@ -485,15 +487,15 @@ stringify (LoxBool b) = return $ fmap toLower (show b)
 stringify (LoxNum n) = return $ showFixed True n
 stringify (LoxFn fn) = return "<function>"
 stringify (LoxClass cls) = return $ "<class " <> T.unpack (className cls) <> ">"
-stringify (LoxObj (Object cls flds)) = do
-    fs <- HM.toList <$> liftIO (readIORef flds)
+stringify (LoxObj Object{..}) = do
+    fs <- HM.toList <$> liftIO (readIORef objectFields)
     fs' <- mapM (sequence . second stringify) fs
     return $ concat
-           $ ["<", T.unpack (className cls), " "]
+           $ ["<", T.unpack (className objectClass), "[", show objectId, "] "]
              ++ L.intersperse " " [T.unpack k <> "=" <> v | (k, v) <- fs']
              ++ [">"]
-stringify (LoxArray (AtomArray rvs)) = do
-    vs <- liftIO (readIORef rvs)
+stringify (LoxArray arr) = do
+    vs <- readArray arr
     es <- V.toList . fmap (\s -> '"' : s <> "\"") <$> mapM stringify vs
     return $ concat [ "["
                     , L.intercalate ", " es
@@ -505,12 +507,12 @@ isInteger d = d == fromInteger (floor d)
 
 binaryFns :: HashMap BinaryOp BinaryFn
 binaryFns = HM.fromList
-    [(Equals,        (lb .) . (==))
-    ,(NotEquals,     (lb .) . (/=))
-    ,(LessThan,      (lb .) . (<))
-    ,(LessThanEq,    (lb .) . (<=))
-    ,(GreaterThan,   (lb .) . (>))
-    ,(GreaterThanEq, (lb .) . (>=))
+    [(Equals,        lb (== EQ))
+    ,(NotEquals,     lb (/= EQ))
+    ,(LessThan,      lb (== LT))
+    ,(LessThanEq,    lb (/= GT))
+    ,(GreaterThan,   lb (== GT))
+    ,(GreaterThanEq, lb (/= LT))
     ,(Add,           addAtoms)
     ,(Subtract,      numericalFn "subtract" (-))
     ,(Multiply,      numericalFn "multiply" (*))
@@ -518,7 +520,23 @@ binaryFns = HM.fromList
     ,(Mod,           numericalFn "mod" (\a b -> fromInteger(floor a `mod` floor b)))
     ,(Seq,           (\a b -> a `seq` return b))
     ]
-    where lb = return . LoxBool
+    where lb f a b = LoxBool . f <$> a <=> b
+
+(<=>) :: Atom -> Atom -> LoxT Ordering
+LoxNil        <=> LoxNil = return EQ
+LoxNil        <=> _      = return LT
+_             <=> LoxNil = return GT
+(LoxBool a)   <=> (LoxBool b)   = return (a `compare` b)
+(LoxNum a)    <=> (LoxNum b)    = return (a `compare` b)
+(LoxString a) <=> (LoxString b) = return (a `compare` b)
+(LoxClass a)  <=> (LoxClass b)  = return (classId a `compare` classId b)
+(LoxObj a)    <=> (LoxObj b)    = return (objectId a `compare` objectId b)
+(LoxArray a)  <=> (LoxArray b)  = do
+    as <- readArray a
+    bs <- readArray b
+    ords <- V.zipWithM (<=>) as bs
+    return $ fromMaybe (V.length as `compare` V.length bs) $ V.find (/= EQ) ords
+a <=> b = throw' $ "Cannot compare " <> typeOf a <> " and " <> typeOf b
 
 throw' :: String -> LoxT a
 throw' = throwError . LoxError Unlocated
@@ -548,3 +566,8 @@ modEnv :: (Env -> Env) -> LoxT (Env, Env)
 modEnv f = do old <- gets bindings
               let new = f old
               (old, new) <$ putEnv new
+
+nextId :: LoxT Int
+nextId = do c <- gets currentId
+            modify' $ \s -> s { currentId = succ c }
+            return c

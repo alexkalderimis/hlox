@@ -3,18 +3,18 @@
 
 module Lox.Syntax where
 
-import GHC.Generics (Generic)
-
-import Data.IORef
-import qualified Data.List as L
-import Data.Monoid
-import Data.Hashable (Hashable)
-import Data.Text hiding (length, reverse)
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HM
-import Lox.Environment (Environment)
+import Control.Monad.IO.Class
 import Data.Fixed
+import Data.HashMap.Strict (HashMap)
+import Data.Hashable (Hashable)
+import Data.IORef
+import Data.Monoid
+import Data.Text hiding (length, reverse)
 import Data.Vector (Vector)
+import GHC.Generics (Generic)
+import Lox.Environment (Environment)
+import qualified Data.HashMap.Strict as HM
+import qualified Data.List as L
 
 type VarName = Text
 type Env = Environment VarName Atom
@@ -47,12 +47,12 @@ data Statement = While SourceLocation Expr Statement
                | If SourceLocation Expr Statement (Maybe Statement)
                | ClassDecl SourceLocation VarName (Maybe VarName) [Method]
                | Iterator SourceLocation VarName Expr Statement
-            deriving (Show, Eq)
+            deriving (Show)
 
 data Method = Constructor [VarName] Statement
             | StaticMethod VarName [VarName] Statement
             | InstanceMethod VarName [VarName] Statement
-            deriving (Show, Eq)
+            deriving (Show)
 
 instance Located Statement where
     sourceLoc (While loc _ _) = loc
@@ -71,7 +71,7 @@ instance Located Statement where
 data LVal = LVar VarName
           | Set Expr VarName
           | SetIdx Expr Expr
-          deriving (Show, Eq)
+          deriving (Show)
 
 data Expr = Literal SourceLocation Atom
           | Grouping SourceLocation Expr
@@ -86,7 +86,7 @@ data Expr = Literal SourceLocation Atom
           | GetField SourceLocation Expr VarName
           | Index SourceLocation Expr Expr
           | Array SourceLocation [Expr]
-          deriving (Show, Eq)
+          deriving (Show)
 
 instance Located Expr where
     sourceLoc (Literal loc _) = loc
@@ -118,12 +118,6 @@ instance Show Callable where
                                 <> " (" <> show body <> "))"
     show (BuiltIn _ _) = "[NativeCode]"
 
-instance Ord Callable where
-    a `compare` b = EQ
-
-instance Eq Callable where
-    a == b = True
-
 data Atom = LoxNil
           | LoxBool Bool
           | LoxNum Nano
@@ -132,44 +126,51 @@ data Atom = LoxNil
           | LoxClass Class
           | LoxObj Object 
           | LoxArray AtomArray
-          deriving (Ord, Show, Eq)
+          deriving (Show)
 
-newtype AtomArray = AtomArray (IORef (Vector Atom))
+newtype AtomArray = AtomArray { unArray :: IORef (Vector Atom) }
 
--- TODO: atoms clearly cannot all be Ords and Eqs
 instance Show AtomArray where
     show a = "AtomArray"
 
-instance Eq AtomArray where
-    a == b = False
+nil :: Atom -> Bool
+nil LoxNil = True
+nil _ = False
 
-instance Ord AtomArray where
-    a `compare` b = EQ
+readArray :: MonadIO m => AtomArray -> m (Vector Atom)
+readArray = liftIO . readIORef . unArray
 
 type Methods = HM.HashMap VarName Callable
 
 data Class = Class
-    { className :: VarName
+    { classId :: Int
+    , className :: VarName
     , superClass :: Maybe Class
     , initializer :: Maybe Callable
     , staticMethods :: Methods
     , methods :: Methods
     } deriving (Show)
 
-data Object = Object Class (IORef (HM.HashMap VarName Atom))
-    deriving (Eq)
+emptyClass :: Class
+emptyClass = Class (-1) "" Nothing Nothing mempty mempty
+
+data Object = Object
+    { objectId :: Int
+    , objectClass :: Class
+    , objectFields :: IORef (HM.HashMap VarName Atom)
+    }
+
+instance Eq Object where
+    a == b = objectId a == objectId b
 
 instance Show Object where
-    show (Object cls _) = "<" <> unpack (className cls) <> " instance>"
-
-instance Ord Object where
-    (Object n _) `compare` (Object n' _) = n `compare` n'
+    show o = mconcat ["<", unpack (className $ objectClass o)
+                     ,"@", show (objectId o)
+                     ,">"
+                     ]
 
 instance Eq Class where
-    a == b = className a == className b
-
-instance Ord Class where
-    a `compare` b = className a `compare` className b
+    a == b = classId a == classId b
 
 data BinaryOp = Equals
               | NotEquals
@@ -187,4 +188,4 @@ data BinaryOp = Equals
               | Mod
               deriving (Generic, Show, Eq)
 
-instance Hashable BinaryOp
+instance Hashable BinaryOp -- requires Generic

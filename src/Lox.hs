@@ -8,13 +8,14 @@ module Lox
 
 import Prelude hiding (readFile, getLine, putStr, putStrLn, unwords)
 import System.Console.Readline
-import Data.Text hiding (null)
+import Data.Text hiding (foldr, null, filter)
 import Data.Maybe
 import System.IO (hFlush, stderr, stdout)
 import System.Exit
 import Data.Monoid
 import Data.Text.IO (hPutStrLn, readFile, getLine, putStrLn, putStr)
 import Control.Monad
+import Control.Applicative
 import Control.Monad.State.Strict
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
@@ -55,7 +56,7 @@ runFile fileName = do
                       Right _ -> return ()
 
 runPrompt :: IO ()
-runPrompt = welcome >> builtins >>= go replOpts
+runPrompt = welcome >> (interpreter <$> builtins) >>= go replOpts
     where
         exit = putStrLn "Goodbye!"
         
@@ -69,7 +70,7 @@ runPrompt = welcome >> builtins >>= go replOpts
               Just ":a" -> go (opts{ showAST = not (showAST opts) }) env
               Just ":s" -> go (opts{ showState = not (showState opts) }) env
               Just ":r" -> go (opts{ showResult = not (showResult opts) }) env
-              Just ":env" -> do readEnv env >>= printBindings
+              Just ":env" -> do readEnv (bindings env) >>= printBindings
                                 go opts env
               Just code -> do env' <- run' opts env (pack code)
                               addHistory code
@@ -94,8 +95,8 @@ help = mapM_ putStrLn $
     ":env Print the current environment":
     []
 
-run' :: ReplOpts -> Env -> Text -> IO Env
-run' ReplOpts{..} env code = do
+run' :: ReplOpts -> Interpreter -> Text -> IO Interpreter
+run' ReplOpts{..} intS code = do
     let (ts, errs) = tokens code
     when showTokens  $ do
         putStrLn "==== TOKENS"
@@ -108,16 +109,16 @@ run' ReplOpts{..} env code = do
 
     case fst parsed of
       Left e  -> do parseError e
-                    return env
+                    return intS
       Right p -> do let lox = runProgram p
                     when showResult $ putStrLn "=== OUTPUT"
                     res <- evalLoxT (runProgram p)
-                                    (interpreter $ enterScope env)
+                                    (intS { bindings = enterScope (bindings intS) })
                     case res of
                       Left e -> do runtimeError e
-                                   return env
+                                   return intS
                       Right (v, s) -> do
-                          when (not showResult && v /= LoxNil) $ do
+                          when (not showResult && not (nil v)) $ do
                               printLox v
                           when showResult $ do
                               putStrLn "==== RESULT"
@@ -127,7 +128,7 @@ run' ReplOpts{..} env code = do
                               readEnv (bindings s) >>= printBindings
                           when (not $ HS.null $ warnings s) $ do
                               mapM_ (putStrLn . ("[WARNING] " <>)) (warnings s)
-                          return (bindings s)
+                          recordIt v s
 
 printBindings :: [HashMap Text Atom] -> IO ()
 printBindings [] = return ()
@@ -157,3 +158,23 @@ runtimeError LoxContinue{} = return ()
 runtimeError LoxReturn{} = return ()
 runtimeError e = do putStr "[RUNTIME ERROR] "
                     putStrLn (pack $ show e)
+
+removeEmptyScopes :: Env -> Env
+removeEmptyScopes (Environment ms) = Environment (filter (not . HM.null) ms)
+
+renameIts :: Env -> Env
+renameIts (Environment ms) = Environment (go ms 0)
+    where go [] _ = []
+          go (m:ms) 0 = m : go ms (if HM.member "it" m then 1 else 0)
+          go (m:ms) n = let k = "it" <> pack (show n)
+                            oldKs = ["it", "it" <> pack (show $ pred n)]
+                            mx = getFirst $ foldMap (\k -> First $ HM.lookup k m) oldKs
+                            m' = maybe m (\x -> HM.insert k x (foldr HM.delete m oldKs)) mx
+                            n' = maybe n (const (succ n)) mx
+                        in m' : go ms n'
+
+recordIt :: Atom -> Interpreter -> IO Interpreter
+recordIt LoxNil s = return $ s { bindings = removeEmptyScopes (bindings s) }
+recordIt v s = do env <- declare "it" (enterScope $ bindings s)
+                  assign "it" v env
+                  return s { bindings = renameIts (removeEmptyScopes env) }
