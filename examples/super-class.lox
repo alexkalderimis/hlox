@@ -32,15 +32,15 @@ class Worm extends Animal {
 
 class Cerberus extends Dog {
     init() {
-        this.super()
+        super()
         this.exists = false
     }
 }
 
 class TalkativeCat extends Cat {
     speak() {
-        this.super.speak()
-        this.super.speak()
+        super.speak()
+        super.speak()
     }
 }
 

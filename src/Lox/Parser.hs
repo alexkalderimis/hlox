@@ -23,6 +23,11 @@ data ParserState = ParserState
     , inMethod :: !Bool
     } deriving (Show)
 
+data ParseError = Fatal !SourceLocation !Text
+                | Recoverable !SourceLocation !Text
+                | NoParse
+                deriving (Show, Eq)
+
 tokenStream :: FilePath -> Tokens -> ParserState
 tokenStream fp ts = ParserState
     { tokens = ts
@@ -33,7 +38,7 @@ tokenStream fp ts = ParserState
     }
 
 newtype Parser a = Parser
-    { runParser :: (ParserState -> (Either [String] a, ParserState)) }
+    { runParser :: (ParserState -> (Either ParseError a, ParserState)) }
     deriving Functor
 
 instance Applicative Parser where
@@ -43,27 +48,31 @@ instance Applicative Parser where
                                 in (f <*> a, s'')
 instance Monad Parser where
     return = pure
-    fail e = Parser $ \s ->
-        let SourceLocation t l c = location s
-            msg = "At line " <> show l <> ", col " <> show c <> ": " <> e
-         in (Left [msg], s)
+    fail e = Parser $ \s -> (Left (Recoverable (location s) (pack e)), s)
     pa >>= f = Parser $ \s ->
         let (ma, s') = runParser pa s
          in either (\es -> (Left es, s')) (\a -> runParser (f a) s') ma
 
 instance Alternative Parser where
-    empty   = Parser (Left ["<empty>"],)
+    empty   = Parser (Left NoParse,)
     some pa = fmap return pa
     left <|> right = Parser $ \s -> case runParser left s of
-        (Left es, _) -> runParser right s
-        ok           -> ok
+        r@(Left Fatal{}, _) -> r
+        (Left _, _)         -> runParser right s
+        ok                  -> ok
+
+backtrack :: Text -> Parser a
+backtrack msg = Parser $ \s -> (Left (Recoverable (location s) msg), s)
+
+fatal :: Text -> Parser a
+fatal msg = Parser $ \s -> (Left (Fatal (location s) msg), s)
 
 program :: Parser Program
 program = many declaration <* eof
 
 eof :: Parser ()
 eof = expect EOF <|> (do n <- next
-                         fail ("Expected EOF, got " <> show n))
+                         fatal ("Expected EOF, got " <> pack (show n)))
 
 declaration :: Parser Statement
 declaration =   (classDeclaration <* semis)
@@ -161,18 +170,21 @@ statement = do
 
 returnStatement :: Parser Statement
 returnStatement = do
+    KEYWORD "return" <- next
     b <- is returnable
-    if not b then fail "Cannot return outside a function body"
-             else do expect (KEYWORD "return")
-                     l <- loc
+    if not b then fatal "Cannot return outside a function body"
+             else do l <- loc
                      mval <- optional expression
                      return (Return l (fromMaybe (Literal l LoxNil) mval))
 
 loopControl :: Parser Statement
 loopControl = do
     b <- is breakable
-    if b then break <|> continue
-         else empty
+    ms <- optional (break <|> continue)
+    case ms of
+      Nothing        -> empty
+      Just _ | not b -> fatal "Use of loop control statement outside loop"
+      Just s         -> return s
     where
         break    = expect (KEYWORD "break")    *> (Break <$> loc)
         continue = expect (KEYWORD "continue") *> (Continue <$> loc)
@@ -191,8 +203,8 @@ whileStatement :: Parser Statement
 whileStatement = do
     expect (KEYWORD "while")
     start <- loc
-    condition <- predicate
-    body <- breaking statement
+    condition <- predicate <|> fatal "expected a predicate in while"
+    body <- breaking statement <|> fatal "expected a statement"
     end <- loc
     return (While (start :..: end) condition body)
 
@@ -242,7 +254,7 @@ printStatement :: Parser Statement
 printStatement = do
     expect (KEYWORD "print")
     start <- loc
-    e <- expression
+    e <- expression <|> fatal "print statement without expression"
     end <- loc
     return (Print (start :..: end) e)
 
@@ -282,7 +294,7 @@ assignment = do
             here <- loc
             lhs <- lval
             expect EQUAL
-            e <- assignment
+            e <- assignment <|> fatal "missing expression after ="
             return (Assign (here :..: sourceLoc e) lhs e)
         lval = do
             lhs <- call
@@ -298,9 +310,9 @@ ifThenElse = do
     start <- loc
     p <- expression
     expect (KEYWORD "then")
-    a <- expression
+    a <- expression <|> fatal "no then-expression in if-then-else expression"
     expect (KEYWORD "else")
-    b <- expression
+    b <- expression <|> fatal "no else-expression in if-then-else expression"
     end <- loc
     return (IfThenElse (start :..: end) p a b)
 
@@ -353,9 +365,12 @@ call = atom >>= finishCall
             Just DOT -> do
                 meth <- is inMethod
                 name <- identifier <|> ("class" <$ keyword "class")
-                                   <|> (if meth then "super" <$ keyword "super" else empty) 
                 end <- loc
                 finishCall $ GetField (sourceLoc e :..: end) e name
+        super meth = do keyword "super"
+                        if meth then return "super"
+                                else fatal "illegal reference to super outside method"
+
 
 group :: Parser Expr
 group = do
@@ -375,14 +390,18 @@ fnExpr = do
     return (Lambda (start :..: end) args body)
 
 atom :: Parser Expr
-atom = ident <|> array <|> p <|> group <|> fail "expected an expression"
+atom = ident <|> array <|> p <|> group
   where
       ident = do t <- next
                  l <- loc
                  case t of
                    IDENTIFIER v -> return (Var l v)
+                   KEYWORD "super" -> do inM <- is inMethod
+                                         if inM then return $ GetField l (Var l "this") "super"
+                                                else fatal "illegal use of 'super' outside method"
                    KEYWORD "this" -> do inM <- is inMethod
-                                        if inM then return (Var l "this") else empty
+                                        if inM then return (Var l "this")
+                                                else fatal "illegal use of 'this' outside method"
                    _ -> empty
       array = do expect LEFT_SQUARE
                  start <- loc
@@ -400,8 +419,8 @@ atom = ident <|> array <|> p <|> group <|> fail "expected an expression"
                                 "true" -> return $ LoxBool True
                                 "false" -> return $ LoxBool False
                                 "nil" -> return $ LoxNil
-                                _ -> fail ("Unexpected keyword: " <> show kw)
-                _ -> fail ("Unexpected token: " <> show t)
+                                _ -> backtrack ("Unexpected keyword " <> pack (show kw))
+                _ -> backtrack ("Unexpected token " <> pack (show t))
             return (Literal l a)
 
 type Keyword = Text
@@ -410,7 +429,7 @@ keyword :: Keyword -> Parser ()
 keyword = expect . KEYWORD
 
 expect :: Token -> Parser ()
-expect t = (() <$ anyOf [t]) <|> fail ("expected " <> show t)
+expect t = (() <$ anyOf [t]) <|> backtrack ("expected " <> pack (show t))
 
 anyOf :: [Token] -> Parser Token
 anyOf ts = match (`elem` ts)
@@ -419,13 +438,13 @@ anyOf ts = match (`elem` ts)
 -- pop a token from the stream and store its location
 next :: Parser Token
 next = Parser $ \s -> case tokens s of
-    []             -> (Left ["EOF"], s)
+    []             -> (Left (Fatal (location s) "EOF"), s)
     ((l, c, t):ts) -> (Right t, s { tokens = ts
                                   , location = SourceLocation (fileName s) l c
                                   })
 
 fileName :: ParserState -> Text
-fileName s = let ((t, _, _), _) = range (location s)
+fileName s = let (SourceLocation t _ _) = location s
               in t
 
 skipWhile :: (Token -> Bool) -> Parser ()
@@ -444,7 +463,7 @@ manySepBy t pa = go False
             (:) <$> pa <*> (go True <|> pure [])
 
 match :: (Token -> Bool) -> Parser Token
-match f = p <|> fail ("failed match")
+match f = p <|> backtrack "Failed match"
     where p = do t <- next
                  if f t
                     then return t

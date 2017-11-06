@@ -6,7 +6,7 @@ module Lox
     , runPrompt
     ) where
 
-import Prelude hiding (readFile, getLine, putStr, putStrLn)
+import Prelude hiding (readFile, getLine, putStr, putStrLn, unwords)
 import System.Console.Readline
 import Data.Text hiding (null)
 import Data.Maybe
@@ -44,7 +44,7 @@ runFile fileName = do
         exitFailure
     let parsed = runParser program (tokenStream fileName ts)
     case fst parsed of
-      Left es -> do forM_ es $ \e -> putStr "[SYNTAX ERROR] " >> putStrLn (pack e)
+      Left e  -> do parseError e
                     exitFailure
       Right p -> do env <- builtins
                     res <- evalLoxT (runProgram p) (interpreter env)
@@ -107,15 +107,14 @@ run' ReplOpts{..} env code = do
         print parsed
 
     case fst parsed of
-      Left es -> do forM_ es $ \e -> putStr "[SYNTAX ERROR] " >> putStrLn (pack e)
+      Left e  -> do parseError e
                     return env
       Right p -> do let lox = runProgram p
                     when showResult $ putStrLn "=== OUTPUT"
                     res <- evalLoxT (runProgram p)
                                     (interpreter $ enterScope env)
                     case res of
-                      Left e -> do putStr "[RUNTIME ERROR] "
-                                   putStrLn (pack $ show e)
+                      Left e -> do runtimeError e
                                    return env
                       Right (v, s) -> do
                           when (not showResult && v /= LoxNil) $ do
@@ -139,10 +138,22 @@ printBindings (m:ms) = do
         putStr " = "
         printLox v
     printBindings ms
-printError :: Maybe Error -> IO ()
-printError (Just (Error lineno loc msg)) = hPutStrLn stderr msg'
-    where msg' = mconcat ["[line " ,pack (show lineno)
-                         ,"] Error"
-                         ,loc ,": " ,msg
-                         ]
-printError _ = return ()
+
+parseError :: ParseError -> IO ()
+parseError e = case e of
+    NoParse       -> putStrLn "[SYNTAX ERROR] could not parse value"
+    Fatal loc msg -> putE loc msg
+    Recoverable loc msg -> putE loc msg
+    where
+        putE loc msg = putStrLn $ mconcat ["[SYNTAX ERROR] " ,niceLoc loc ," ", msg ]
+        point t l c = unwords [t, ":", pack (show l), "..", pack (show c)]
+        niceLoc loc = let (l@(a, b, c), r@(d, e, f)) = range loc
+                       in if l == r then point a b c
+                                    else point a b c <> " - " <> point d e f
+
+runtimeError :: LoxExecption -> IO ()
+runtimeError LoxBreak{} = return ()
+runtimeError LoxContinue{} = return ()
+runtimeError LoxReturn{} = return ()
+runtimeError e = do putStr "[RUNTIME ERROR] "
+                    putStrLn (pack $ show e)
