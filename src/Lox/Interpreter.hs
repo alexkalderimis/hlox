@@ -107,7 +107,7 @@ exec (Define loc v e) = do
 
 exec (Declare _ v) = do
     env <- gets bindings >>= liftIO . declare v
-    modify' $ \s -> s { bindings = env }
+    putEnv env
     return LoxNil
 
 exec (ClassDecl loc name msuper methods) = do
@@ -144,11 +144,11 @@ exec (ClassDecl loc name msuper methods) = do
         undef = loxError loc $ "Could not find super-class " <> show name
 
 exec (Block _ sts) = do
-    env <- gets bindings
-    modify' $ \s -> s { bindings = enterScope (bindings s) }
+    (env, _) <- modEnv enterScope
     mapM_ exec sts
-    modify' $ \s -> s { bindings = env  }
+    putEnv env
     return LoxNil
+
 exec (If _ condition a mb) = do
     p <- truthy <$> eval condition
     if p
@@ -169,33 +169,42 @@ exec (Continue l) = throwError (LoxContinue l)
 exec (Return l e) = throwError =<< (LoxReturn l <$> eval e)
 
 exec (Iterator loc loopVar e body) = do
-    env <- gets bindings
+    (old, env) <- modEnv enterScope
+
     obj <- eval e
     Stepper a next <- iteratee (sourceLoc e) obj
-    modify' $ \s -> s { bindings = enterScope (bindings s) }
-    exec (Declare loc loopVar)
-    loop next a
-    modify' $ \s -> s { bindings = env  }
+    env <- liftIO (declare loopVar env)
+    putEnv env
+
+    loop env next a
+
+    putEnv old
     return LoxNil
     where
-        loop next a = do
+        loop env next a = do
             (ma, a') <- next a
             case ma of
               Nothing -> return LoxNil
               Just curr -> do
-                  env <- gets bindings
                   liftIO (assign loopVar curr env)
                   exec body
-                  loop next a'
+                  loop env next a'
 
 data Stepper = forall a. Stepper a (a -> LoxT (Maybe Atom, a))
 
 iteratee :: SourceLocation -> Atom -> LoxT Stepper
+
 iteratee loc (LoxArray vs) = do
     let seed   = (0 :: Int)
         next i = return (vs !? i, succ i)
     return $ Stepper seed next
-        
+
+iteratee loc (LoxObj (Object _ fs)) = do
+    keys <- fmap LoxString . HM.keys <$> liftIO (readIORef fs)
+    let next []     = return (Nothing, [])
+        next (k:ks) = return (Just k, ks)
+    return $ Stepper keys next
+
 iteratee loc a = loxError loc $ "Cannot iterate over objects of type " <> typeOf a
 
 eval :: Expr -> LoxT Atom
@@ -353,13 +362,12 @@ apply loc (BuiltIn _ fn) args = liftIO (fn args)
 apply _ (Function names body env) args = do
    old <- gets bindings
    let xs = zip names args
-   env' <- liftIO (enterScopeWith (zip names args) env)
-   modify' $ \s -> s { bindings = env' }
+   liftIO (enterScopeWith (zip names args) env) >>= putEnv
    --- unwrap blocks to avoid double scoping
    let sts = case body of Block _ sts -> sts
                           _ -> [body]
    r <- (LoxNil <$ mapM_ exec sts) `catchError` catchReturn
-   modify' $ \s -> s { bindings = old }
+   putEnv old
    return r
    where
     catchReturn (LoxReturn _ v) = return v
@@ -465,3 +473,11 @@ initialise lox = do
     modify' $ \s -> s { initialising = initing }
     return r
 
+putEnv :: Env -> LoxT ()
+putEnv env = modify' $ \s -> s { bindings = env }
+
+-- returns (old, new)
+modEnv :: (Env -> Env) -> LoxT (Env, Env)
+modEnv f = do old <- gets bindings
+              let new = f old
+              (old, new) <$ putEnv new
