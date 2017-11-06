@@ -14,6 +14,7 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import Lox.Environment (Environment)
 import Data.Fixed
+import Data.Vector (Vector)
 
 type VarName = Text
 type Env = Environment VarName Atom
@@ -45,6 +46,7 @@ data Statement = While SourceLocation Expr Statement
                | Return SourceLocation Expr
                | If SourceLocation Expr Statement (Maybe Statement)
                | ClassDecl SourceLocation VarName (Maybe VarName) [Method]
+               | Iterator SourceLocation VarName Expr Statement
             deriving (Show, Eq)
 
 data Method = Constructor [VarName] Statement
@@ -64,6 +66,7 @@ instance Located Statement where
     sourceLoc (Return loc _) = loc
     sourceLoc (If loc _ _ _) = loc
     sourceLoc (ClassDecl loc _ _ _) = loc
+    sourceLoc (Iterator loc _ _ _) = loc
 
 data LVal = LVar VarName
           | Set Expr VarName
@@ -80,6 +83,7 @@ data Expr = Literal SourceLocation Atom
           | Call SourceLocation Expr [Expr]
           | Lambda SourceLocation [VarName] Statement
           | GetField SourceLocation Expr VarName
+          | Array SourceLocation [Expr]
           deriving (Show, Eq)
 
 instance Located Expr where
@@ -94,6 +98,7 @@ instance Located Expr where
     sourceLoc (Call loc _ _) = loc
     sourceLoc (Lambda loc _ _) = loc
     sourceLoc (GetField loc _ _) = loc
+    sourceLoc (Array loc _) = loc
 
 -- Native function that supports errors and IO
 type NativeFn = [Atom] -> IO (Either String Atom)
@@ -123,6 +128,7 @@ data Atom = LoxNil
           | LoxFn Callable
           | LoxClass Class
           | LoxObj Object 
+          | LoxArray (Vector Atom)
           deriving (Ord, Show, Eq)
 
 type Methods = HM.HashMap VarName Callable

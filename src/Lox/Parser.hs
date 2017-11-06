@@ -9,6 +9,7 @@ import Data.Maybe
 import Data.Monoid
 import Control.Applicative
 import Data.Text hiding (empty, group, reverse)
+import qualified Data.Vector as V
 
 import Lox.Syntax
 import Lox.Scanner (Tokens, Token(..))
@@ -152,6 +153,7 @@ statement = do
          <|> printStatement
          <|> whileStatement
          <|> oldStyleForLoop
+         <|> newStyleForLoop
          <|> expressionStatement
          <|> blockStatement
     skipWhile (== SEMICOLON)
@@ -213,6 +215,21 @@ oldStyleForLoop = do
                       (fromMaybe (Literal here (LoxBool True)) mcond)
                       (Block here (body : maybeToList mpost))
     return (Block here (maybeToList minit <> [while]))
+
+newStyleForLoop :: Parser Statement
+newStyleForLoop = do
+    keyword "for"
+    start <- loc
+    expect LEFT_PAREN
+    IDENTIFIER loopVar <- next
+    keyword "in"
+    iteree <- expression
+    expect RIGHT_PAREN
+    body <- breaking statement
+    end <- loc
+
+    let here = start :..: end
+    return (Iterator here loopVar iteree body)
 
 predicate :: Parser Expr
 predicate = do
@@ -352,7 +369,7 @@ fnExpr = do
     return (Lambda (start :..: end) args body)
 
 atom :: Parser Expr
-atom = ident <|> p <|> group <|> fail "expected an expression"
+atom = ident <|> array <|> p <|> group <|> fail "expected an expression"
   where
       ident = do t <- next
                  l <- loc
@@ -361,6 +378,12 @@ atom = ident <|> p <|> group <|> fail "expected an expression"
                    KEYWORD "this" -> do inM <- is inMethod
                                         if inM then return (Var l "this") else empty
                    _ -> empty
+      array = do expect LEFT_SQUARE
+                 start <- loc
+                 xs <- manySepBy COMMA atom
+                 expect RIGHT_SQUARE
+                 end <- loc
+                 return $ Array (start :..: end) xs
       p = do
             t <- next
             l <- loc

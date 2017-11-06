@@ -8,7 +8,7 @@ module Lox
 
 import Prelude hiding (readFile, getLine, putStr, putStrLn)
 import System.Console.Readline
-import Data.Text
+import Data.Text hiding (null)
 import Data.Maybe
 import System.IO (hFlush, stderr, stdout)
 import System.Exit
@@ -38,9 +38,21 @@ replOpts = ReplOpts False False False False
 runFile :: FilePath -> IO ()
 runFile fileName = do
     code <- readFile fileName
-    env <- builtins
-    run' replOpts mempty code
-    return ()
+    let (ts, errs) = tokens code
+    when (not $ null errs) $ do
+        mapM_ print errs
+        exitFailure
+    let parsed = runParser program (tokenStream fileName ts)
+    case fst parsed of
+      Left es -> do forM_ es $ \e -> putStr "[SYNTAX ERROR] " >> putStrLn (pack e)
+                    exitFailure
+      Right p -> do env <- builtins
+                    res <- evalLoxT (runProgram p) (interpreter env)
+                    case res of
+                      Left e -> do putStr "[RUNTIME ERROR] "
+                                   putStrLn (pack $ show e)
+                                   exitFailure
+                      Right _ -> return ()
 
 runPrompt :: IO ()
 runPrompt = welcome >> builtins >>= go replOpts

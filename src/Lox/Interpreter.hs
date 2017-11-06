@@ -1,6 +1,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 module Lox.Interpreter where
 
@@ -25,6 +27,8 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.List as L
 import qualified Data.Text as T
+import qualified Data.Vector as V
+import           Data.Vector ((!?))
 
 import Lox.Syntax
 import Lox.Environment (
@@ -164,6 +168,36 @@ exec (Break l)    = throwError (LoxBreak l)
 exec (Continue l) = throwError (LoxContinue l)
 exec (Return l e) = throwError =<< (LoxReturn l <$> eval e)
 
+exec (Iterator loc loopVar e body) = do
+    env <- gets bindings
+    obj <- eval e
+    Stepper a next <- iteratee (sourceLoc e) obj
+    modify' $ \s -> s { bindings = enterScope (bindings s) }
+    exec (Declare loc loopVar)
+    loop next a
+    modify' $ \s -> s { bindings = env  }
+    return LoxNil
+    where
+        loop next a = do
+            (ma, a') <- next a
+            case ma of
+              Nothing -> return LoxNil
+              Just curr -> do
+                  env <- gets bindings
+                  liftIO (assign loopVar curr env)
+                  exec body
+                  loop next a'
+
+data Stepper = forall a. Stepper a (a -> LoxT (Maybe Atom, a))
+
+iteratee :: SourceLocation -> Atom -> LoxT Stepper
+iteratee loc (LoxArray vs) = do
+    let seed   = (0 :: Int)
+        next i = return (vs !? i, succ i)
+    return $ Stepper seed next
+        
+iteratee loc a = loxError loc $ "Cannot iterate over objects of type " <> typeOf a
+
 eval :: Expr -> LoxT Atom
 
 eval (Lambda _ args body) = LoxFn . Function args body <$> gets bindings
@@ -274,6 +308,10 @@ eval (Call loc callee args) = do
                                   else loxError loc $ "Cannot call initializer outside of init()"
         _        -> loxError loc $ "Cannot call " <> typeOf e
 
+eval (Array loc exprs) = do
+    as <- V.fromList <$> mapM eval exprs
+    return (LoxArray as)
+
 init :: SourceLocation -> Object -> [Atom] -> LoxT ()
 init loc obj@(Object cls _) args = construct obj args
     where
@@ -355,6 +393,7 @@ typeOf (LoxBool _) = "Boolean"
 typeOf LoxNil = "nil"
 typeOf (LoxFn _) = "Function"
 typeOf (LoxClass _) = "Class"
+typeOf (LoxArray _) = "Array"
 
 addAtoms :: BinaryFn
 addAtoms (LoxString a) (LoxString b) = return $ LoxString (a <> b)

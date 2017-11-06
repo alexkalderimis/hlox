@@ -35,7 +35,9 @@ type Tokens = [(Int, Int, Token)]
 
 data Token = 
     -- Single-character tokens.
-    LEFT_PAREN | RIGHT_PAREN | LEFT_BRACE | RIGHT_BRACE
+    LEFT_PAREN | RIGHT_PAREN
+    | LEFT_BRACE | RIGHT_BRACE
+    | LEFT_SQUARE | RIGHT_SQUARE
     | COMMA | DOT | MINUS | PLUS | SEMICOLON | SLASH | STAR
     | PERCENT
 
@@ -63,7 +65,7 @@ reservedWords = HS.fromList
     ,"class", "extends", "fun", "super", "this", "static"
     ,"let"
     ,"print", "return"
-    ,"while", "for", "break", "continue"
+    ,"while", "for", "in", "break", "continue"
     ,"nil"
     ]
 
@@ -83,6 +85,8 @@ go (Just (c, rst)) =
             ')' -> token RIGHT_PAREN
             '{' -> token LEFT_BRACE
             '}' -> token RIGHT_BRACE
+            '[' -> token LEFT_SQUARE
+            ']' -> token RIGHT_SQUARE
             ',' -> token COMMA
             '.' -> token DOT
             '-' -> token MINUS
