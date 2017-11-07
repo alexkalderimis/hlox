@@ -457,15 +457,31 @@ arrayClass = baseClass { className = "Array"
                                                _ -> return (Left $ LoxError Unlocated "bad args")))
                   ]
 
-        methods = [("map", BuiltInMethod 1
+        methods = [("fold", BuiltInMethod 2
+                            (\[vs, acc, f] ->
+                                case (vs, f) of
+                                  (LoxArray arr, LoxFn fn) -> do
+                                      let s = interpreter mempty
+                                          f m a = apply Unlocated fn [m, a]
+                                          lox = readArray arr >>= V.foldM f acc
+                                      runLoxT lox s
+                                  _ -> return (Left $ LoxError Unlocated "bad args")))
+
+                  ,("filter",
+                           BuiltInMethod 1
+                           (\[vs, f] -> case (vs, f) of
+                              (LoxArray arr, LoxFn fn) -> do
+                                  let s = interpreter mempty
+                                      f a = truthy <$> apply Unlocated fn [a]
+                                      lox = readArray arr >>= V.filterM f >>= loxArray
+                                  runLoxT lox s
+                              _ -> return (Left $ LoxError Unlocated "bad args")))
+                  ,("map", BuiltInMethod 1
                            (\[vs, f] -> case (vs, f) of
                                           (LoxArray arr, LoxFn fn) -> do
                                               let s = interpreter mempty
                                                   f a = apply Unlocated fn [a]
-                                              vs <- readArray arr
-                                              let lox = do vs' <- sequence $ fmap f vs
-                                                           arr' <- liftIO (newIORef vs')
-                                                           return $ LoxArray (AtomArray arr')
+                                                  lox = readArray arr >>= mapM f >>= loxArray
                                               runLoxT lox s
                                           _ -> return (Left $ LoxError Unlocated "bad args")))]
 
@@ -619,3 +635,5 @@ locateError :: SourceLocation -> LoxExecption -> LoxT a
 locateError loc (LoxError Unlocated e) = loxError loc e
 locateError _  e                      = throwError e
 
+loxArray :: V.Vector Atom -> LoxT Atom
+loxArray vs = LoxArray . AtomArray <$> liftIO (newIORef vs)
