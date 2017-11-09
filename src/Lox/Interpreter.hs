@@ -11,7 +11,7 @@ import Prelude hiding (init)
 
 import Data.Fixed
 import Control.Applicative
-import Control.Arrow (second)
+import Control.Arrow ((&&&), second)
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Control.Monad (when)
@@ -22,6 +22,7 @@ import Data.Maybe
 import Data.Maybe (isJust)
 import Data.Monoid
 import Data.Text (Text)
+import Data.Function (on)
 import Data.Traversable
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
@@ -122,10 +123,11 @@ exec (ClassDecl loc name msuper methods) = do
     parent <- sequence $ fmap (findSuperClass env) msuper
     classId <- liftIO newSingleton
     base <- gets object
+    core <- gets (object &&& array)
 
-    let constructors = [ Function args body env | (Constructor args body) <- methods]
-        statics      = [(n, Function as b env)  | (StaticMethod n as b) <- methods]
-        instances    = [(n, Function as b env)  | (InstanceMethod n as b) <- methods]
+    let constructors = [ Function args body core env | (Constructor args body) <- methods]
+        statics      = [(n, Function as b core env)  | (StaticMethod n as b) <- methods]
+        instances    = [(n, Function as b core env)  | (InstanceMethod n as b) <- methods]
 
     -- verify constructors
     constructor <- case constructors of
@@ -214,7 +216,9 @@ iterable loc a = do
 
 eval :: Expr -> LoxT Atom
 
-eval (Lambda _ args body) = LoxFn . Function args body <$> gets bindings
+eval (Lambda _ args body) = fmap LoxFn $
+    Function args body <$> (gets (object &&& array))
+                       <*> gets bindings
 
 eval (GetField loc e field) = do
     inst <- eval e
@@ -338,6 +342,13 @@ eval (Array loc exprs) = do
     as <- mapM eval exprs >>= liftIO . A.fromList LoxNil
     return (LoxArray (AtomArray as))
 
+eval (Mapping loc pairs) = do
+    cls <- gets object
+    obj <- liftIO $ new cls
+    vals <- mapM (sequence . second eval) pairs
+    liftIO $ writeIORef (objectFields obj) (HM.fromList vals)
+    return (LoxObj obj)
+
 init :: SourceLocation -> Object -> [Atom] -> LoxT ()
 init loc obj args = construct obj args
     where
@@ -375,8 +386,8 @@ new cls = Object cls <$> newIORef HM.empty
 bindThis :: Atom -> Callable -> LoxT Callable
 bindThis this (BuiltIn ar fn)
   = return $ BuiltIn (\n -> ar (n + 1)) (\args -> fn (this : args))
-bindThis this (Function ns body env)
-  = Function ns body <$> liftIO (enterScopeWith [("this", this)] env)
+bindThis this (Function ns body core env)
+  = Function ns body core <$> liftIO (enterScopeWith [("this", this)] env)
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
 apply loc fn args | not (arity fn (length args)) = loxError loc msg
@@ -385,19 +396,27 @@ apply loc fn args | not (arity fn (length args)) = loxError loc msg
 
 apply loc (BuiltIn _ fn) args = fromLoxResult loc (fn args)
 
-apply _ (Function names body env) args = do
-   old <- gets bindings
-   let xs = zip names args
-   liftIO (enterScopeWith (zip names args) env) >>= putEnv
-   --- unwrap blocks to avoid double scoping
-   let sts = case body of Block _ sts -> sts
-                          _ -> [body]
-   r <- (LoxNil <$ mapM_ exec sts) `catchError` catchReturn
-   putEnv old
-   return r
-   where
-    catchReturn (LoxReturn _ v) = return v
-    catchReturn e               = throwError e
+apply _ (Function names body core env) args = do
+    old <- get -- snapshot the old environment
+
+    -- setup the closed over environment
+    let xs = zip names args
+    env' <- liftIO $ enterScopeWith (zip names args) (bindings old)
+    put old { bindings = env', object = fst core, array = snd core }
+    --- unwrap blocks to avoid double scoping
+    let sts = case body of Block _ sts -> sts
+                           _ -> [body]
+
+    -- actually run the function here
+    r <- (LoxNil <$ mapM_ exec sts) `catchError` catchReturn
+
+    -- restore the old environment, along with any new warnings
+    ws <- gets warnings
+    put old { warnings = ws }
+    return r
+    where
+     catchReturn (LoxReturn _ v) = return v
+     catchReturn e               = throwError e
 
 warn :: SourceLocation -> Text -> LoxT ()
 warn loc msg = modify' $ \s -> s { warnings = HS.insert (locS <> msg) (warnings s) }
@@ -435,12 +454,12 @@ stringify (LoxNum n) = return $ showFixed True n
 stringify (LoxFn fn) = return "<function>"
 stringify (LoxClass cls) = return $ "<class " <> T.unpack (className cls) <> ">"
 stringify (LoxObj Object{..}) = do
-    fs <- HM.toList <$> liftIO (readIORef objectFields)
+    fs <- L.sortBy (compare `on` fst) . HM.toList <$> liftIO (readIORef objectFields)
     fs' <- mapM (sequence . second stringify) fs
     return $ concat
-           $ ["<", T.unpack (className objectClass), " "]
-             ++ L.intersperse " " [T.unpack k <> "=" <> v | (k, v) <- fs']
-             ++ [">"]
+           $ ["{"]
+             ++ L.intersperse "," [T.unpack k <> ":" <> v | (k, v) <- fs']
+             ++ ["}"]
 stringify (LoxArray arr) = do
     vs <- readArray arr
     es <- V.toList <$> mapM quoteString vs

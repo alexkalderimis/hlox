@@ -112,6 +112,7 @@ data Expr = Literal SourceLocation Atom
           | GetField SourceLocation Expr VarName
           | Index SourceLocation Expr Expr
           | Array SourceLocation [Expr]
+          | Mapping SourceLocation [(VarName, Expr)]
           deriving (Show)
 
 instance Located Expr where
@@ -128,20 +129,25 @@ instance Located Expr where
     sourceLoc (GetField loc _ _) = loc
     sourceLoc (Index loc _ _) = loc
     sourceLoc (Array loc _) = loc
+    sourceLoc (Mapping loc _) = loc
 
 -- Native function that supports errors and IO
 type NativeFn = [Atom] -> LoxResult Atom
 
-data Callable = Function [VarName] Statement Env
+-- functions carry around references to Object and Array
+-- which lets us use literal notation.
+type CoreClasses = (Class, Class)
+
+data Callable = Function [VarName] Statement CoreClasses Env
               | BuiltIn (Int -> Bool) NativeFn
 
 -- is this arity acceptable to this function?
 arity :: Callable -> Int -> Bool
-arity (Function args _ _) n = length args == n
+arity (Function args _ _ _) n = length args == n
 arity (BuiltIn p _)       n = p n
 
 instance Show Callable where
-    show (Function args body _) = "(Function " <> show args
+    show (Function args body _ _) = "(Function " <> show args
                                 <> " (" <> show body <> "))"
     show (BuiltIn _ _) = "[NativeCode]"
 

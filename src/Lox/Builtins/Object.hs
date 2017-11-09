@@ -17,7 +17,10 @@ baseClass :: Class
 baseClass = emptyClass
     { className = "Object"
     , classId = (unsafeSingleton ())
-    , methods = HM.fromList [("keys", (BuiltIn (== 1) objectKeys))]
+    , methods = HM.fromList
+                [("keys", (BuiltIn (== 1) objectKeys))
+                ,("entries", (BuiltIn (== 1) objectEntries))
+                ]
     , protocols = HM.fromList
                   [ ( Settable, BuiltIn (== 3) setField )
                   , ( Gettable, BuiltIn (== 2) getField )
@@ -31,6 +34,16 @@ objectKeys [LoxObj Object{..}] = do
     hm <- liftIO $ readIORef objectFields
     vs <- AtomArray <$> A.fromList LoxNil (fmap LoxString $ HM.keys hm)
     return (Right $ LoxArray vs)
+
+objectEntries :: NativeFn
+
+objectEntries [LoxObj Object{..}] = do
+    es <- HM.toList <$> (liftIO $ readIORef objectFields)
+    vs <- atomArray <$> (mapM pair es >>= A.fromList LoxNil)
+    return (Right vs)
+    where
+        atomArray = LoxArray . AtomArray
+        pair (k, v) =  atomArray <$> A.fromList LoxNil [LoxString k, v]
 
 iterator :: NativeFn
 

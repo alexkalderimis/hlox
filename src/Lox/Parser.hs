@@ -390,7 +390,7 @@ fnExpr = do
     return (Lambda (start :..: end) args body)
 
 atom :: Parser Expr
-atom = ident <|> array <|> p <|> group
+atom = ident <|> array <|> mapping <|> p <|> group
   where
       ident = do t <- next
                  l <- loc
@@ -409,6 +409,20 @@ atom = ident <|> array <|> p <|> group
                  expect RIGHT_SQUARE
                  end <- loc
                  return $ Array (start :..: end) xs
+      mapping = do expect LEFT_BRACE
+                   start <- loc
+                   ps <- manySepBy COMMA keyval
+                   expect RIGHT_BRACE
+                   end <- loc
+                   return $ Mapping (start :..: end) ps
+      keyval = do k <- do t <- next
+                          case t of
+                            IDENTIFIER k -> return k
+                            STRING k -> return k
+                            _ -> empty
+                  expect COLON
+                  v <- assignment
+                  return (k, v)
       p = do
             t <- next
             l <- loc
