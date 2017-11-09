@@ -7,9 +7,12 @@ import Control.Arrow (second)
 import Data.Traversable
 import Data.IORef
 import Data.Monoid
+import Data.Foldable (foldMap)
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
+import Data.HashSet (HashSet)
 import qualified Data.HashMap.Strict as HM
+import qualified Data.HashSet as HS
 
 -- Environments are persistent linked mappings of mutable values
 type Ref a = IORef (Maybe a)
@@ -66,3 +69,6 @@ enterScopeWith vals (scopes -> ms) = do
 inCurrentScope :: (Hashable k, Eq k) => k -> Environment k v -> Bool
 inCurrentScope _ (Environment []) = False
 inCurrentScope k (Environment (m:_)) = HM.member k m
+
+boundNames :: (Hashable k, Eq k) => Environment k v -> HashSet k
+boundNames = foldMap (HS.fromList . HM.keys) . scopes
