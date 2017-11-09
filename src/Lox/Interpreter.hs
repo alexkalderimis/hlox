@@ -99,9 +99,9 @@ exec (Print _ e) = do v <- eval e
                       return LoxNil
 exec (ExprS e) = eval e
 
-exec (DefineFn loc v ns body) = do
+exec (DefineFn loc v args body) = do
     exec (Declare loc v) -- functions can recurse, so declare before define
-    eval (Assign loc (LVar v) (Lambda loc ns body))
+    eval (Assign loc (LVar v) (Lambda loc args body))
 
 exec (Define loc v e) = do
     isBound <- gets (inCurrentScope v . bindings)
@@ -125,9 +125,9 @@ exec (ClassDecl loc name msuper methods) = do
     base <- gets object
     core <- gets (object &&& array)
 
-    let constructors = [ Function args body core env | (Constructor args body) <- methods]
-        statics      = [(n, Function as b core env)  | (StaticMethod n as b) <- methods]
-        instances    = [(n, Function as b core env)  | (InstanceMethod n as b) <- methods]
+    let constructors = [ Function ns r body core env | (Constructor (ns, r) body) <- methods]
+        statics      = [(n, Function ns r b core env)  | (StaticMethod n (ns,r) b) <- methods]
+        instances    = [(n, Function ns r b core env)  | (InstanceMethod n (ns,r) b) <- methods]
 
     -- verify constructors
     constructor <- case constructors of
@@ -216,9 +216,9 @@ iterable loc a = do
 
 eval :: Expr -> LoxT Atom
 
-eval (Lambda _ args body) = fmap LoxFn $
-    Function args body <$> (gets (object &&& array))
-                       <*> gets bindings
+eval (Lambda _ (names, rst) body) = fmap LoxFn $
+    Function names rst body <$> (gets (object &&& array))
+                            <*> gets bindings
 
 eval (GetField loc e field) = do
     inst <- eval e
@@ -338,9 +338,7 @@ eval (Call loc callee args) = do
                                   else loxError loc $ "Cannot call initializer outside of init()"
         _        -> loxError loc $ "Cannot call " <> typeOf e
 
-eval (Array loc exprs) = do
-    as <- mapM eval exprs >>= liftIO . A.fromList LoxNil
-    return (LoxArray (AtomArray as))
+eval (Array loc exprs) = mapM eval exprs >>= atomArray
 
 eval (Mapping loc pairs) = do
     cls <- gets object
@@ -348,6 +346,9 @@ eval (Mapping loc pairs) = do
     vals <- mapM (sequence . second eval) pairs
     liftIO $ writeIORef (objectFields obj) (HM.fromList vals)
     return (LoxObj obj)
+
+atomArray :: [Atom] -> LoxT Atom
+atomArray as = LoxArray . AtomArray <$> liftIO (A.fromList LoxNil as)
 
 init :: SourceLocation -> Object -> [Atom] -> LoxT ()
 init loc obj args = construct obj args
@@ -386,8 +387,8 @@ new cls = Object cls <$> newIORef HM.empty
 bindThis :: Atom -> Callable -> LoxT Callable
 bindThis this (BuiltIn ar fn)
   = return $ BuiltIn (\n -> ar (n + 1)) (\args -> fn (this : args))
-bindThis this (Function ns body core env)
-  = Function ns body core <$> liftIO (enterScopeWith [("this", this)] env)
+bindThis this (Function ns rst body core env)
+  = Function ns rst body core <$> liftIO (enterScopeWith [("this", this)] env)
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
 apply loc fn args | not (arity fn (length args)) = loxError loc msg
@@ -396,12 +397,16 @@ apply loc fn args | not (arity fn (length args)) = loxError loc msg
 
 apply loc (BuiltIn _ fn) args = fromLoxResult loc (fn args)
 
-apply _ (Function names body core env) args = do
+apply _ (Function names rst body core env) args = do
     old <- get -- snapshot the old environment
 
     -- setup the closed over environment
     let xs = zip names args
-    env' <- liftIO $ enterScopeWith (zip names args) env
+    slurp <- sequence . fmap sequence $
+             [(v, atomArray (drop (length names) args)) 
+             | v <- maybeToList rst
+             ]
+    env' <- liftIO $ enterScopeWith (zip names args <> slurp) env
     put old { bindings = env', object = fst core, array = snd core }
     --- unwrap blocks to avoid double scoping
     let sts = case body of Block _ sts -> sts

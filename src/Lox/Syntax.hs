@@ -61,7 +61,7 @@ data LoxException = LoxError SourceLocation String
                   deriving (Show)
 
 data Statement = While SourceLocation Expr Statement
-               | DefineFn SourceLocation VarName [VarName] Statement
+               | DefineFn SourceLocation VarName Arguments Statement
                | Define SourceLocation VarName Expr
                | Declare SourceLocation VarName
                | ExprS Expr
@@ -75,9 +75,9 @@ data Statement = While SourceLocation Expr Statement
                | Iterator SourceLocation VarName Expr Statement
             deriving (Show)
 
-data Method = Constructor [VarName] Statement
-            | StaticMethod VarName [VarName] Statement
-            | InstanceMethod VarName [VarName] Statement
+data Method = Constructor Arguments Statement
+            | StaticMethod VarName Arguments Statement
+            | InstanceMethod VarName Arguments Statement
             deriving (Show)
 
 instance Located Statement where
@@ -99,6 +99,8 @@ data LVal = LVar VarName
           | SetIdx Expr Expr
           deriving (Show)
 
+type Arguments = ([VarName], Maybe VarName)
+
 data Expr = Literal SourceLocation Atom
           | Grouping SourceLocation Expr
           | Var SourceLocation VarName
@@ -108,7 +110,7 @@ data Expr = Literal SourceLocation Atom
           | IfThenElse SourceLocation Expr Expr Expr
           | Assign SourceLocation LVal Expr
           | Call SourceLocation Expr [Expr]
-          | Lambda SourceLocation [VarName] Statement
+          | Lambda SourceLocation Arguments Statement
           | GetField SourceLocation Expr VarName
           | Index SourceLocation Expr Expr
           | Array SourceLocation [Expr]
@@ -138,16 +140,18 @@ type NativeFn = [Atom] -> LoxResult Atom
 -- which lets us use literal notation.
 type CoreClasses = (Class, Class)
 
-data Callable = Function [VarName] Statement CoreClasses Env
-              | BuiltIn (Int -> Bool) NativeFn
+data Callable = BuiltIn (Int -> Bool) NativeFn
+              | Function [VarName] (Maybe VarName)
+                         Statement CoreClasses Env
 
 -- is this arity acceptable to this function?
 arity :: Callable -> Int -> Bool
-arity (Function args _ _ _) n = length args == n
-arity (BuiltIn p _)       n = p n
+arity (Function _ (Just _) _ _ _) _ = True
+arity (Function args _ _ _ _)     n = length args == n
+arity (BuiltIn p _)               n = p n
 
 instance Show Callable where
-    show (Function args body _ _) = "(Function " <> show args
+    show (Function args mr body _ _) = "(Function " <> show args <> show mr
                                 <> " (" <> show body <> "))"
     show (BuiltIn _ _) = "[NativeCode]"
 

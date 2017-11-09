@@ -8,7 +8,7 @@ import Control.Monad
 import Data.Maybe
 import Data.Monoid
 import Control.Applicative
-import Data.Text hiding (empty, group, reverse)
+import Data.Text hiding (null, empty, group, reverse)
 import qualified Data.Vector as V
 
 import Lox.Syntax
@@ -125,12 +125,16 @@ functionBody tok = returning $
     <|>
     (expect tok >> (returnStatement <|> (Return <$> loc <*> expression)))
 
-arguments :: Parser [VarName]
+arguments :: Parser Arguments
 arguments = do
     expect LEFT_PAREN
     names <- manySepBy COMMA identifier
+    rest <- optional $ do
+                if null names then pure () else expect COMMA
+                expect DOT >> expect DOT
+                identifier
     expect RIGHT_PAREN
-    return names
+    return (names, rest)
 
 identifier :: Parser VarName
 identifier = do IDENTIFIER var <- next
@@ -521,3 +525,5 @@ breaking pa = do
     where
         setBreaking b = Parser $ \s -> (Right (), s { breakable = b })
 
+tracePeek :: String -> Parser ()
+tracePeek mgs = Parser $ \s -> traceShow (mgs, listToMaybe $ tokens s) (Right (), s)
