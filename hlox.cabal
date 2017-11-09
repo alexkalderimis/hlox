@@ -33,7 +33,7 @@ library
                      , hashable
                      , unordered-containers
                      , clock
-                     , readline
+                     , haskeline
                      , vector
                      , random
   default-language:    Haskell2010

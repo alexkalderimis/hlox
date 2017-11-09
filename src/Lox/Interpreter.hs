@@ -397,7 +397,13 @@ init loc obj args = construct obj args
 lookupProtocol :: Protocol -> Atom -> LoxT (Maybe Callable)
 lookupProtocol p a = do
     mcls <- classOf a
-    return (mcls >>= HM.lookup p . protocols)
+    case mcls of
+      Nothing -> return Nothing
+      Just cls -> return (classProtocol cls)
+    where
+        classProtocol cls = case HM.lookup p (protocols cls) of
+                              Nothing -> superClass cls >>= classProtocol
+                              Just fn -> return fn
 
 classOf :: Atom -> LoxT (Maybe Class)
 classOf (LoxObj o) = return (Just $ objectClass o)

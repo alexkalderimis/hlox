@@ -7,11 +7,12 @@ module Lox
     ) where
 
 import Prelude hiding (readFile, getLine, putStr, putStrLn, unwords)
-import System.Console.Readline
+import System.Console.Haskeline
 import Data.Text hiding (foldr, null, filter)
 import Data.Maybe
 import System.IO (hFlush, stderr, stdout)
 import System.Exit
+import Data.IORef
 import Data.Monoid
 import Data.Text.IO (hPutStrLn, readFile, getLine, putStrLn, putStr)
 import Control.Monad
@@ -22,6 +23,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
 import Lox.Language
+import Lox.Environment (boundNames)
 import Lox.Builtins (builtins)
 
 data Error = Error Int Text Text
@@ -58,25 +60,42 @@ runFile fileName = do
                       Right _ -> return ()
 
 runPrompt :: IO ()
-runPrompt = welcome >> builtins >>= interpreter >>= go replOpts
+runPrompt = do
+    names <- newIORef ([] :: [Text])
+    welcome
+    s <- builtins >>= interpreter
+    let settings = setComplete (completeNames names)
+                 $ defaultSettings
+    runInputT settings (go names replOpts s)
     where
-        exit = putStrLn "Goodbye!"
+        exit = outputStrLn "Goodbye!"
+
+        completeNames ref = completeWord Nothing [' ', '\t'] $ \s -> do
+            let t = pack s
+            currentNames <- liftIO (readIORef ref)
+            return [simpleCompletion (unpack n)
+                        | n <- currentNames
+                        , t `isPrefixOf` n
+                        ]
         
-        go opts env = do
-            ml <- readline "Lox > "
+        go :: IORef [Text] -> ReplOpts -> Interpreter -> InputT IO ()
+        go names opts env = do
+            let loop = go names
+            ml <- getInputLine "Lox > "
             case ml of
               Nothing -> exit
               Just ":q" -> exit
-              Just ":?" -> help >> go opts env
-              Just ":t" -> go (opts{ showTokens = not (showTokens opts) }) env
-              Just ":a" -> go (opts{ showAST = not (showAST opts) }) env
-              Just ":s" -> go (opts{ showState = not (showState opts) }) env
-              Just ":r" -> go (opts{ showResult = not (showResult opts) }) env
-              Just ":env" -> do readEnv (bindings env) >>= printBindings
-                                go opts env
-              Just code -> do env' <- run' opts env (pack code)
-                              addHistory code
-                              go opts env'
+              Just ":?" -> liftIO help >> loop opts env
+              Just ":t" -> loop (opts{ showTokens = not (showTokens opts) }) env
+              Just ":a" -> loop (opts{ showAST = not (showAST opts) }) env
+              Just ":s" -> loop (opts{ showState = not (showState opts) }) env
+              Just ":r" -> loop (opts{ showResult = not (showResult opts) }) env
+              Just ":env" -> do liftIO (readEnv (bindings env) >>= printBindings)
+                                loop opts env
+              Just code -> do env' <- liftIO (run' opts env (pack code))
+                              let ns = HS.toList $ boundNames (bindings env')
+                              liftIO (writeIORef names ns)
+                              loop opts env'
 
 welcome :: IO ()
 welcome = mapM_ putStrLn $

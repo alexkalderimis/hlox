@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Lox.Builtins (builtins) where
 
@@ -17,7 +18,7 @@ import qualified Lox.Builtins.Random as R
 
 builtins :: IO Env
 builtins = enterScopeWith vals mempty
-    where vals = classes [A.array, O.baseClass, R.random]
+    where vals = classes [A.array, O.baseClass, R.random, errorCls]
                  ++
                  [("clock", LoxFn (BuiltIn "clock" (== 0) clock))
                  ,("apply", LoxFn (BuiltIn "apply" (== 2) applyFun))
@@ -26,6 +27,19 @@ builtins = enterScopeWith vals mempty
 
 classes :: [Class] -> [(VarName, Atom)]
 classes cs = [(className c, LoxClass c) | c <- cs]
+
+errorCls :: Class
+errorCls = emptyClass
+    { className = "Error"
+    , classId = unsafeSingleton ()
+    , superClass = Just O.baseClass 
+    , initializer = Just (BuiltIn "Error.init" (== 2) setErrorMsg)
+    }
+
+setErrorMsg :: NativeFn
+setErrorMsg [LoxObj Object{..}, msg] = do
+    modifyIORef objectFields $ HM.insert "message" msg
+    return (Right LoxNil)
 
 clock :: NativeFn
 clock _ = fmap (Right . LoxNum . (/ 1e9) . realToFrac . toNanoSecs)
