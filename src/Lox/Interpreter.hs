@@ -401,7 +401,7 @@ apply _ (Function names body core env) args = do
 
     -- setup the closed over environment
     let xs = zip names args
-    env' <- liftIO $ enterScopeWith (zip names args) (bindings old)
+    env' <- liftIO $ enterScopeWith (zip names args) env
     put old { bindings = env', object = fst core, array = snd core }
     --- unwrap blocks to avoid double scoping
     let sts = case body of Block _ sts -> sts
