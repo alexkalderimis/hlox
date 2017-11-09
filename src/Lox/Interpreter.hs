@@ -412,15 +412,6 @@ truthy LoxNil      = False
 truthy (LoxBool b) = b
 truthy _           = True
 
-typeOf :: Atom -> String
-typeOf (LoxString _) = "String"
-typeOf (LoxNum _) = "Number"
-typeOf (LoxBool _) = "Boolean"
-typeOf LoxNil = "nil"
-typeOf (LoxFn _) = "Function"
-typeOf (LoxClass _) = "Class"
-typeOf (LoxArray _) = "Array"
-
 addAtoms :: BinaryFn
 addAtoms (LoxString a) (LoxString b) = return $ LoxString (a <> b)
 addAtoms (LoxNum a) (LoxNum b) = return $ LoxNum (a + b)

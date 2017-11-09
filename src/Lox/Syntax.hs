@@ -156,6 +156,17 @@ data Atom = LoxNil
           | LoxIter Stepper
           deriving (Show)
 
+typeOf :: Atom -> String
+typeOf LoxNil = "nil"
+typeOf (LoxBool _) = "Boolean"
+typeOf (LoxNum _) = "Number"
+typeOf (LoxString _) = "String"
+typeOf (LoxFn _) = "Function"
+typeOf (LoxClass _) = "Class"
+typeOf (LoxObj _) = "Object"
+typeOf (LoxArray _) = "Array"
+typeOf (LoxIter _) = "Iterator"
+
 data Stepper = forall a. Stepper a (a -> LoxResult (Maybe Atom, a))
 
 instance Show Stepper where

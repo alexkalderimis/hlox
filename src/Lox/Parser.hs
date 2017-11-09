@@ -405,7 +405,7 @@ atom = ident <|> array <|> p <|> group
                    _ -> empty
       array = do expect LEFT_SQUARE
                  start <- loc
-                 xs <- manySepBy COMMA atom
+                 xs <- manySepBy COMMA assignment
                  expect RIGHT_SQUARE
                  end <- loc
                  return $ Array (start :..: end) xs
