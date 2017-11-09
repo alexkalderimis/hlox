@@ -158,8 +158,20 @@ runtimeError :: LoxException -> IO ()
 runtimeError LoxBreak{} = return ()
 runtimeError LoxContinue{} = return ()
 runtimeError LoxReturn{} = return ()
+runtimeError (ArgumentError loc n types args) = do
+     putStr "[ARGUMENT ERROR] "
+     putStr $ niceLoc loc
+     putStr $ " | " <> n <> " expected (" <> intercalate ", " (fmap pack types) <> ")"
+     putStrLn $ " but got (" <> intercalate ", " (fmap (pack . typeOf) args) <> ")"
 runtimeError e = do putStr "[RUNTIME ERROR] "
                     putStrLn (pack $ show e)
+
+niceLoc :: SourceLocation -> Text
+niceLoc loc = case range loc of
+    (l, r) | l == r -> place l
+    (l, r) -> place l <> " - " <> place r
+    where
+    place (t, l, c) = t <> " (" <> pack (show l) <> "," <> pack (show c) <> ")"
 
 removeEmptyScopes :: Env -> Env
 removeEmptyScopes (Environment ms) = Environment (filter (not . HM.null) ms)

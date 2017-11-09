@@ -391,7 +391,7 @@ fnExpr = do
     args <- arguments
     body <- functionBody EQUAL_GT
     end <- loc
-    return (Lambda (start :..: end) args body)
+    return (Lambda (start :..: end) Nothing args body)
 
 atom :: Parser Expr
 atom = ident <|> array <|> mapping <|> p <|> group

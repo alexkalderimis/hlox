@@ -11,7 +11,7 @@ import Lox.Syntax (
     Env, LoxException(..),
     Expr(..), Statement(..),
     Program, Value, LoxResult,
-    Atom(..), SourceLocation(..), range, nil)
+    Atom(..), SourceLocation(..), typeOf, range, nil)
 import Lox.Parser (
     tokenStream, expression, program, ParseError(..), Parser(runParser))
 import Lox.Environment (Environment(..), declare, assign, enterScope, readEnv)

@@ -10,15 +10,16 @@ import Lox.Syntax hiding (arity)
 import qualified Lox.Builtins.Object as O
 
 random :: Class
-random = emptyClass { className = "Random"
-                    , classId = unsafeSingleton ()
-                    , superClass = Just O.baseClass
-                    , staticMethods = HM.fromList
-                                        [("int", BuiltIn arity  randomInt)
-                                        ,("float", BuiltIn arity randomFloat)
-                                        ,("char", BuiltIn arity randomChar)
-                                        ]
-                    }
+random = emptyClass
+    { className = "Random"
+    , classId = unsafeSingleton ()
+    , superClass = Just O.baseClass
+    , staticMethods = HM.fromList
+                      [("int", BuiltIn "Random.int" arity  randomInt)
+                      ,("float", BuiltIn "Random.float" arity randomFloat)
+                      ,("char", BuiltIn "Random.char" arity randomChar)
+                      ]
+    }
 
 arity :: Int -> Bool
 arity = (`elem` [0, 2])

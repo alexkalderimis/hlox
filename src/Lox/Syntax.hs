@@ -14,13 +14,15 @@ import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable)
 import Data.IORef
 import Data.Monoid
-import Data.Text hiding (length, reverse)
+import Data.Text hiding (unwords, length, reverse)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
 import Lox.Environment (Environment)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.List as L
+import qualified Data.Text as T
+
 import qualified Lox.Core.Array as A
 
 type Value = Either LoxException Atom
@@ -56,8 +58,8 @@ data LoxException = LoxError SourceLocation String
                   | LoxReturn SourceLocation Atom
                   | LoxBreak SourceLocation
                   | LoxContinue SourceLocation
-                  | ArgumentError SourceLocation
-                                  [String] [Atom]
+                  | ArgumentError SourceLocation 
+                                  VarName [String] [Atom]
                   deriving (Show)
 
 data Statement = While SourceLocation Expr Statement
@@ -110,7 +112,7 @@ data Expr = Literal SourceLocation Atom
           | IfThenElse SourceLocation Expr Expr Expr
           | Assign SourceLocation LVal Expr
           | Call SourceLocation Expr [Expr]
-          | Lambda SourceLocation Arguments Statement
+          | Lambda SourceLocation (Maybe VarName) Arguments Statement
           | GetField SourceLocation Expr VarName
           | Index SourceLocation Expr Expr
           | Array SourceLocation [Expr]
@@ -127,7 +129,7 @@ instance Located Expr where
     sourceLoc (IfThenElse loc _ _ _) = loc
     sourceLoc (Assign loc _ _) = loc
     sourceLoc (Call loc _ _) = loc
-    sourceLoc (Lambda loc _ _) = loc
+    sourceLoc (Lambda loc _ _ _) = loc
     sourceLoc (GetField loc _ _) = loc
     sourceLoc (Index loc _ _) = loc
     sourceLoc (Array loc _) = loc
@@ -140,20 +142,25 @@ type NativeFn = [Atom] -> LoxResult Atom
 -- which lets us use literal notation.
 type CoreClasses = (Class, Class)
 
-data Callable = BuiltIn (Int -> Bool) NativeFn
-              | Function [VarName] (Maybe VarName)
+data Callable = BuiltIn VarName (Int -> Bool) NativeFn
+              | Function (Maybe VarName) [VarName] (Maybe VarName)
                          Statement CoreClasses Env
 
 -- is this arity acceptable to this function?
 arity :: Callable -> Int -> Bool
-arity (Function _ (Just _) _ _ _) _ = True
-arity (Function args _ _ _ _)     n = length args == n
-arity (BuiltIn p _)               n = p n
+arity (Function _ _ (Just _) _ _ _) _ = True
+arity (Function _ args _ _ _ _)     n = length args == n
+arity (BuiltIn _ p _)               n = p n
 
 instance Show Callable where
-    show (Function args mr body _ _) = "(Function " <> show args <> show mr
-                                <> " (" <> show body <> "))"
-    show (BuiltIn _ _) = "[NativeCode]"
+    show (Function n args mr body _ _) = unwords ["(Function"
+                                                 , show n
+                                                 , show args
+                                                 , show mr
+                                                 , show body
+                                                 , ")"
+                                                 ]
+    show (BuiltIn n _ _) = "[NativeCode " <> T.unpack n <> "]"
 
 data Atom = LoxNil
           | LoxBool Bool
@@ -263,5 +270,5 @@ unsafeSingleton = unsafePerformIO . fmap Singleton . newIORef
 
 -- for use in native modules
 argumentError :: [String] -> [Atom] -> LoxResult Atom
-argumentError types = return . Left . ArgumentError NativeCode types
+argumentError types = return . Left . ArgumentError NativeCode "" types
 

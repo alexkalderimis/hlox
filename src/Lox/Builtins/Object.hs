@@ -18,13 +18,13 @@ baseClass = emptyClass
     { className = "Object"
     , classId = (unsafeSingleton ())
     , methods = HM.fromList
-                [("keys", (BuiltIn (== 1) objectKeys))
-                ,("entries", (BuiltIn (== 1) objectEntries))
+                [("keys", (BuiltIn "Object::keys" (== 1) objectKeys))
+                ,("entries", (BuiltIn "Object::entries" (== 1) objectEntries))
                 ]
     , protocols = HM.fromList
-                  [ ( Settable, BuiltIn (== 3) setField )
-                  , ( Gettable, BuiltIn (== 2) getField )
-                  , ( Iterable, BuiltIn (== 1) iterator )
+                  [ ( Settable, BuiltIn "[] =" (== 3) setField )
+                  , ( Gettable, BuiltIn "[]" (== 2) getField )
+                  , ( Iterable, BuiltIn "__iter" (== 1) iterator )
                   ]
     }
 

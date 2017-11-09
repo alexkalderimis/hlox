@@ -101,7 +101,7 @@ exec (ExprS e) = eval e
 
 exec (DefineFn loc v args body) = do
     exec (Declare loc v) -- functions can recurse, so declare before define
-    eval (Assign loc (LVar v) (Lambda loc args body))
+    eval (Assign loc (LVar v) (Lambda loc (Just v) args body))
 
 exec (Define loc v e) = do
     isBound <- gets (inCurrentScope v . bindings)
@@ -125,9 +125,12 @@ exec (ClassDecl loc name msuper methods) = do
     base <- gets object
     core <- gets (object &&& array)
 
-    let constructors = [ Function ns r body core env | (Constructor (ns, r) body) <- methods]
-        statics      = [(n, Function ns r b core env)  | (StaticMethod n (ns,r) b) <- methods]
-        instances    = [(n, Function ns r b core env)  | (InstanceMethod n (ns,r) b) <- methods]
+    let constructors = [ Function (Just $ name <> ".init") ns r body core env
+                       | (Constructor (ns, r) body) <- methods]
+        statics      = [(n, Function (Just $ name <> "." <> n) ns r b core env)
+                       | (StaticMethod n (ns,r) b) <- methods]
+        instances    = [(n, Function (Just $ name <> "::" <> n) ns r b core env)
+                       | (InstanceMethod n (ns,r) b) <- methods]
 
     -- verify constructors
     constructor <- case constructors of
@@ -216,8 +219,8 @@ iterable loc a = do
 
 eval :: Expr -> LoxT Atom
 
-eval (Lambda _ (names, rst) body) = fmap LoxFn $
-    Function names rst body <$> (gets (object &&& array))
+eval (Lambda _ mname (names, rst) body) = fmap LoxFn $
+    Function mname names rst body <$> (gets (object &&& array))
                             <*> gets bindings
 
 eval (GetField loc e field) = do
@@ -385,19 +388,22 @@ new :: Class -> IO Object
 new cls = Object cls <$> newIORef HM.empty
 
 bindThis :: Atom -> Callable -> LoxT Callable
-bindThis this (BuiltIn ar fn)
-  = return $ BuiltIn (\n -> ar (n + 1)) (\args -> fn (this : args))
-bindThis this (Function ns rst body core env)
-  = Function ns rst body core <$> liftIO (enterScopeWith [("this", this)] env)
+bindThis this (BuiltIn n ar fn)
+  = return $ BuiltIn n (\n -> ar (n + 1)) (\args -> fn (this : args))
+bindThis this (Function n ns rst body core env)
+  = Function n ns rst body core <$> liftIO (enterScopeWith [("this", this)] env)
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
 apply loc fn args | not (arity fn (length args)) = loxError loc msg
     where
         msg = "Wrong number of arguments."
 
-apply loc (BuiltIn _ fn) args = fromLoxResult loc (fn args)
+apply loc (BuiltIn n _ fn) args
+  = fromLoxResult loc (fn args) `catchError` nameFunction
+      where nameFunction (ArgumentError loc "" ts as) = throwError (ArgumentError loc n ts as)
+            nameFunction e = throwError e
 
-apply _ (Function names rst body core env) args = do
+apply _ (Function mname names rst body core env) args = do
     old <- get -- snapshot the old environment
 
     -- setup the closed over environment
@@ -421,6 +427,12 @@ apply _ (Function names rst body core env) args = do
     return r
     where
      catchReturn (LoxReturn _ v) = return v
+     catchReturn (ArgumentError loc "" ts as) = throwError $ ArgumentError
+                                                             loc
+                                                             (fromMaybe "<Anon>"
+                                                                        mname)
+                                                             ts
+                                                             as
      catchReturn e               = throwError e
 
 warn :: SourceLocation -> Text -> LoxT ()
@@ -547,6 +559,6 @@ modEnv f = do old <- gets bindings
 
 locateError :: SourceLocation -> LoxException -> LoxT a
 locateError loc (LoxError Unlocated e) = loxError loc e
-locateError loc (ArgumentError NativeCode ts as)
-  = throwError (ArgumentError loc ts as)
+locateError loc (ArgumentError NativeCode n ts as)
+  = throwError (ArgumentError (simplify loc) n ts as)
 locateError _  e                      = throwError e

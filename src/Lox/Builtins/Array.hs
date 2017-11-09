@@ -20,31 +20,31 @@ array = emptyClass { className = "Array"
                    , methods = HM.fromList arrayMethods
                    , staticMethods = HM.fromList statics
                    , protocols = HM.fromList
-                                 [ (Gettable, BuiltIn (== 2) getElement)
-                                 , (Settable, BuiltIn (== 3) setElement)
-                                 , (Iterable, BuiltIn (== 1) iterator)
+                                 [ (Gettable, BuiltIn "[]" (== 2) getElement)
+                                 , (Settable, BuiltIn "[] =" (== 3) setElement)
+                                 , (Iterable, BuiltIn "__iter" (== 1) iterator)
                                  ]
                    }
 
 statics :: [(VarName, Callable)]
-statics = [("range", BuiltIn (== 2) inclusiveRange)]
+statics = [("range", BuiltIn "Array.range" (== 2) inclusiveRange)]
 
 arrayMethods :: [(VarName, Callable)]
-arrayMethods =
-          [("fold", triple foldArray)
-          ,("filter", double filterArray)
-          ,("map", double mapArray)
-          ,("reverse", single (inPlace A.reverse))
-          ,("sort", single inPlaceSort)
-          ,("sorted", single sortArray)
-          ,("push", double pushArray)
-          ,("pop", single popArray)
-          ,("size", single arraySize)
-          ]
-        where
-            triple = BuiltIn (== 3)
-            double = BuiltIn (== 2)
-            single = BuiltIn (== 1)
+arrayMethods = [(n, BuiltIn ("Array::" <> n) a f) | (BuiltIn n a f) <- fns]
+    where
+        fns = [ triple "fold" foldArray
+              , double "filter" filterArray
+              , double "map" mapArray
+              , single "reverse" (inPlace A.reverse)
+              , single "sort" inPlaceSort
+              , single "sorted" sortArray
+              , double "push" pushArray
+              , single "pop" popArray
+              , single "size" arraySize
+              ]
+        triple n = BuiltIn n (== 3)
+        double n = BuiltIn n (== 2)
+        single n = BuiltIn n (== 1)
 
 getElement :: NativeFn
 getElement [LoxArray (AtomArray arr), LoxNum i] | i >= 0 = do
