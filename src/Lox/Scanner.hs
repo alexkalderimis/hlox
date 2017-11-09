@@ -64,7 +64,7 @@ reservedWords = HS.fromList
     ["and", "or", "if", "then", "else", "false", "true"
     ,"class", "extends", "fun", "super", "this", "static"
     ,"let"
-    ,"print", "return"
+    ,"print", "return", "throw", "try", "catch"
     ,"while", "for", "in", "break", "continue"
     ,"nil"
     ]

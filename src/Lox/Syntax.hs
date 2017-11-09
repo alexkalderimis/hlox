@@ -58,6 +58,7 @@ data LoxException = LoxError SourceLocation String
                   | LoxReturn SourceLocation Atom
                   | LoxBreak SourceLocation
                   | LoxContinue SourceLocation
+                  | UserError SourceLocation Atom
                   | ArgumentError SourceLocation 
                                   VarName [String] [Atom]
                   deriving (Show)
@@ -75,6 +76,8 @@ data Statement = While SourceLocation Expr Statement
                | If SourceLocation Expr Statement (Maybe Statement)
                | ClassDecl SourceLocation VarName (Maybe VarName) [Method]
                | Iterator SourceLocation VarName Expr Statement
+               | Throw SourceLocation Expr
+               | Try SourceLocation Statement [(VarName, Statement)]
             deriving (Show)
 
 data Method = Constructor Arguments Statement
@@ -95,6 +98,8 @@ instance Located Statement where
     sourceLoc (If loc _ _ _) = loc
     sourceLoc (ClassDecl loc _ _ _) = loc
     sourceLoc (Iterator loc _ _ _) = loc
+    sourceLoc (Throw loc _) = loc
+    sourceLoc (Try loc _ _) = loc
 
 data LVal = LVar VarName
           | Set Expr VarName

@@ -164,6 +164,8 @@ statement = do
          <|> loopControl
          <|> returnStatement
          <|> printStatement
+         <|> throwStatement
+         <|> tryCatchStatement
          <|> whileStatement
          <|> oldStyleForLoop
          <|> newStyleForLoop
@@ -261,6 +263,31 @@ printStatement = do
     e <- expression <|> fatal "print statement without expression"
     end <- loc
     return (Print (start :..: end) e)
+
+throwStatement :: Parser Statement
+throwStatement = do
+    expect (KEYWORD "throw")
+    start <- loc
+    e <- expression <|> fatal "throw statement without expression"
+    end <- loc
+    return (Throw (start :..: end) e)
+
+tryCatchStatement :: Parser Statement
+tryCatchStatement = do
+    keyword "try"
+    start <- loc
+    dodgy <- blockStatement
+    handlers <- many catchHandler
+    end <- loc
+    return (Try (start :..: end) dodgy handlers)
+    where
+        catchHandler = do
+            keyword "catch"
+            expect LEFT_PAREN
+            IDENTIFIER var <- next
+            expect RIGHT_PAREN
+            handler <- blockStatement
+            return (var, handler)
 
 blockStatement :: Parser Statement
 blockStatement = do

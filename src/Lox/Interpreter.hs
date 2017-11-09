@@ -92,12 +92,18 @@ runProgram :: Program -> LoxT Atom
 runProgram = foldM runStatement LoxNil
     where runStatement _ s = exec s
 
-exec :: -- (MonadError String m, Monad m, MonadLox m) =>
-        Statement -> LoxT Atom
+exec :: Statement -> LoxT Atom
+
 exec (Print _ e) = do v <- eval e
                       printLox v
                       return LoxNil
 exec (ExprS e) = eval e
+
+exec (Throw loc e) = do v <- eval e
+                        throwError (UserError loc v)
+
+exec (Try loc stm handlers) = exec stm `catchError` handleWith handlers
+
 
 exec (DefineFn loc v args body) = do
     exec (Declare loc v) -- functions can recurse, so declare before define
@@ -207,6 +213,26 @@ exec (Iterator loc loopVar e body) = do
 
 fromLoxResult :: SourceLocation -> LoxResult a -> LoxT a
 fromLoxResult loc r = liftIO r >>= either (locateError loc) return
+
+handleWith :: [(VarName, Statement)] -> LoxException -> LoxT Atom
+handleWith [] e = throwError e
+handleWith (h:hs) e = do
+    let (var, stm) = h
+        stms = unpackBlock stm
+    err <- fromException e
+    old <- gets bindings
+    env <- liftIO $ enterScopeWith [(var, err)] old
+    putEnv env
+    let cleanup = putEnv old
+    (mapM_ exec stms >> return LoxNil <* cleanup)
+        `catchError` (\e -> cleanup >> handleWith hs e)
+    where
+        unpackBlock (Block _ ss) = ss
+        unpackBlock s = [s]
+
+fromException :: LoxException -> LoxT Atom
+fromException (UserError _ e) = return e
+fromException e = throwError e
 
 iterable :: SourceLocation -> Atom -> LoxT Stepper
 iterable loc a = do
