@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -29,6 +30,21 @@ type Value = Either LoxException Atom
 type LoxResult a = IO (Either LoxException a)
 type VarName = Text
 type Env = Environment VarName Atom
+
+type StackFrame = (VarName, SourceLocation)
+
+class HasStackFrame a where
+    stackFrame :: a -> StackFrame
+
+instance HasStackFrame (Text, SourceLocation) where
+    stackFrame = id
+
+instance HasStackFrame Callable where
+    stackFrame (BuiltIn sf _ _) = (sf, NativeCode)
+    stackFrame (Function sf _ _ _ _ _) = sf
+
+instance HasStackFrame Class where
+    stackFrame c = (className c, sourceLoc c)
 
 newtype Singleton = Singleton (IORef ())
     deriving Eq
@@ -61,6 +77,7 @@ data LoxException = LoxError SourceLocation String
                   | UserError SourceLocation Atom
                   | ArgumentError SourceLocation 
                                   VarName [String] [Atom]
+                  | StackifiedError [StackFrame] LoxException
                   deriving (Show)
 
 data Statement = While SourceLocation Expr Statement
@@ -148,7 +165,7 @@ type NativeFn = [Atom] -> LoxResult Atom
 type CoreClasses = (Class, Class)
 
 data Callable = BuiltIn VarName (Int -> Bool) NativeFn
-              | Function (Maybe VarName) [VarName] (Maybe VarName)
+              | Function StackFrame [VarName] (Maybe VarName)
                          Statement CoreClasses Env
 
 -- is this arity acceptable to this function?
@@ -226,11 +243,16 @@ data Class = Class
     , staticMethods :: Methods
     , methods :: Methods
     , protocols :: HM.HashMap Protocol Callable
+    , classLocation :: SourceLocation
     } deriving (Show)
 
 emptyClass :: Class
 emptyClass = Class (unsafePerformIO $ newSingleton)
                    "" Nothing Nothing mempty mempty mempty
+                   Unlocated
+
+instance Located Class where
+    sourceLoc = classLocation
 
 data Object = Object
     { objectClass :: Class

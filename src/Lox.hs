@@ -66,7 +66,7 @@ runPrompt = do
     s <- builtins >>= interpreter
     let settings = setComplete (completeNames names)
                  $ defaultSettings
-    runInputT settings (go names replOpts s)
+    runInputT settings (go 0 names replOpts s)
     where
         exit = outputStrLn "Goodbye!"
 
@@ -78,10 +78,10 @@ runPrompt = do
                         , t `isPrefixOf` n
                         ]
         
-        go :: IORef [Text] -> ReplOpts -> Interpreter -> InputT IO ()
-        go names opts env = do
-            let loop = go names
-            ml <- getInputLine "Lox > "
+        go :: Int -> IORef [Text] -> ReplOpts -> Interpreter -> InputT IO ()
+        go i names opts env = do
+            let loop = go (i+1) names
+            ml <- getInputLine ("repl:" <> show i <> " > ")
             case ml of
               Nothing -> exit
               Just ":q" -> exit
@@ -92,7 +92,7 @@ runPrompt = do
               Just ":r" -> loop (opts{ showResult = not (showResult opts) }) env
               Just ":env" -> do liftIO (readEnv (bindings env) >>= printBindings)
                                 loop opts env
-              Just code -> do env' <- liftIO (run' opts env (pack code))
+              Just code -> do env' <- liftIO (run' i opts env (pack code))
                               let ns = HS.toList $ boundNames (bindings env')
                               liftIO (writeIORef names ns)
                               loop opts env'
@@ -116,9 +116,9 @@ help = mapM_ putStrLn $
     ":env Print the current environment":
     []
 
-run' :: ReplOpts -> Interpreter -> Text -> IO Interpreter
-run' ReplOpts{..} intS code = do
-    let (ts, errs) = tokens code
+run' :: Int -> ReplOpts -> Interpreter -> Text -> IO Interpreter
+run' i ReplOpts{..} intS code = do
+    let (ts, errs) = tokensFrom i code
     when showTokens  $ do
         putStrLn "==== TOKENS"
         mapM_ print ts
@@ -182,6 +182,11 @@ runtimeError (ArgumentError loc n types args) = do
      putStr $ niceLoc loc
      putStr $ " | " <> n <> " expected (" <> intercalate ", " (fmap pack types) <> ")"
      putStrLn $ " but got (" <> intercalate ", " (fmap (pack . typeOf) args) <> ")"
+runtimeError (StackifiedError fs e) = do
+    runtimeError e
+    putStr "In: "
+    forM_ fs $ \(name, loc) -> do
+        putStrLn $ " > " <> name <> " " <> niceLoc loc
 runtimeError e = do putStr "[RUNTIME ERROR] "
                     putStrLn (pack $ show e)
 

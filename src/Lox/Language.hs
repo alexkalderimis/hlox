@@ -6,7 +6,7 @@ module Lox.Language (
     module Lox.Environment
                     ) where
 
-import Lox.Scanner (Token(..), Tokens, tokens)
+import Lox.Scanner (Token(..), Tokens, tokens, tokensFrom)
 import Lox.Syntax (
     Env, LoxException(..),
     Expr(..), Statement(..),

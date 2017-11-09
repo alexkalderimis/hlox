@@ -43,13 +43,14 @@ data Interpreter = Interpreter
     { bindings :: !Env
     , warnings :: !(HS.HashSet Text)
     , initialising :: !Bool
+    , stack :: ![StackFrame]
     , object :: !Class -- the base class all classes must inherit from
     , array :: !Class -- the class of arrays
     }
 
 interpreter :: Env -> IO Interpreter
 interpreter env = 
-    Interpreter env mempty False <$> getClass "Object" <*> getClass "Array"
+    Interpreter env mempty False [] <$> getClass "Object" <*> getClass "Array"
     where
         getClass c = do let mref = resolve c env
                         case mref of
@@ -62,7 +63,7 @@ interpreter env =
 -- we require two effects in the interpreter:
 -- * statefulness of the bindings
 -- * exception handing
-type LoxT a = StateT Interpreter (ExceptT LoxException IO) a
+type LoxT a = ExceptT LoxException (StateT Interpreter IO) a
 
 class Monad m => MonadLox m where
     printLox :: Atom -> m ()
@@ -80,10 +81,24 @@ instance MonadLox m => MonadLox (ExceptT e m) where
     printLox a = lift (printLox a)
 
 runLoxT :: LoxT a -> Interpreter -> LoxResult a
-runLoxT lox s = runExceptT $ evalStateT lox s
+runLoxT lox s = do
+    (ret, s') <- (`runStateT` s) $ runExceptT lox
+    case ret of
+      Left e -> Left <$> stackify s' e
+      Right e -> return (Right e)
 
 evalLoxT :: LoxT a -> Interpreter -> LoxResult (a, Interpreter)
-evalLoxT lox s = runExceptT $ runStateT lox s
+evalLoxT lox s = do
+    (ret, s') <- (`runStateT` s) $ runExceptT lox
+    case ret of
+      Left e -> stackify s' e >> return (Left e)
+      Right v -> return (Right (v, s'))
+
+stackify :: Interpreter -> LoxException -> IO LoxException
+stackify s e = do
+    case stack s of
+      [] -> return e
+      fs -> return (StackifiedError fs e)
 
 run :: Env -> Program -> IO Value
 run env program = interpreter env >>= runLoxT (runProgram program)
@@ -131,11 +146,11 @@ exec (ClassDecl loc name msuper methods) = do
     base <- gets object
     core <- gets (object &&& array)
 
-    let constructors = [ Function (Just $ name <> ".init") ns r body core env
+    let constructors = [ Function (name <> ".init", loc) ns r body core env
                        | (Constructor (ns, r) body) <- methods]
-        statics      = [(n, Function (Just $ name <> "." <> n) ns r b core env)
+        statics      = [(n, Function (name <> "." <> n, loc) ns r b core env)
                        | (StaticMethod n (ns,r) b) <- methods]
-        instances    = [(n, Function (Just $ name <> "::" <> n) ns r b core env)
+        instances    = [(n, Function (name <> "::" <> n, loc) ns r b core env)
                        | (InstanceMethod n (ns,r) b) <- methods]
 
     -- verify constructors
@@ -151,6 +166,7 @@ exec (ClassDecl loc name msuper methods) = do
                                , staticMethods = (HM.fromList statics)
                                , methods = (HM.fromList instances)
                                , protocols = mempty
+                               , classLocation = loc
                                }
     liftIO $ assign name cls env
     return cls
@@ -212,7 +228,13 @@ exec (Iterator loc loopVar e body) = do
                   loop env next a'
 
 fromLoxResult :: SourceLocation -> LoxResult a -> LoxT a
-fromLoxResult loc r = liftIO r >>= either (locateError loc) return
+fromLoxResult loc r = do
+    frames <- gets stack
+    liftIO r >>= either (locateError loc . joinStack frames) return
+    where
+        joinStack :: [StackFrame] -> LoxException -> LoxException
+        joinStack [] e = e
+        joinStack fs e = StackifiedError fs e
 
 handleWith :: [(VarName, Statement)] -> LoxException -> LoxT Atom
 handleWith [] e = throwError e
@@ -245,9 +267,10 @@ iterable loc a = do
 
 eval :: Expr -> LoxT Atom
 
-eval (Lambda _ mname (names, rst) body) = fmap LoxFn $
-    Function mname names rst body <$> (gets (object &&& array))
-                            <*> gets bindings
+eval (Lambda loc mname (names, rst) body) = fmap LoxFn $
+    let frame = (fromMaybe "Anonymous" mname, loc)
+    in Function frame names rst body <$> (gets (object &&& array))
+                                  <*> gets bindings
 
 eval (GetField loc e field) = do
     inst <- eval e
@@ -358,14 +381,27 @@ eval (Assign loc (Set lhs fld) e) = do
 
 eval (Call loc callee args) = do
     e <- eval callee
+    vals <- mapM eval args
+    let frame = ("called at", loc) :: StackFrame
+    
+    inStack frame $ case e of
+      LoxFn fn     -> inStack fn (apply loc fn vals)
+      LoxClass cls -> inStack cls (instantiate loc cls vals)
+      LoxObj o     -> do initing <- gets initialising
+                         if not initing
+                          then initOutsideInit
+                          else inStack (objectClass o) $ LoxNil <$ init loc o vals
+      _            -> loxError loc $ "Cannot call " <> typeOf e
 
-    case e of
-        LoxFn fn -> mapM eval args >>= apply loc fn
-        LoxClass cls -> mapM eval args >>= instantiate loc cls
-        LoxObj o -> do initing <- gets initialising
-                       if initing then LoxNil <$ (mapM eval args >>= init loc o)
-                                  else loxError loc $ "Cannot call initializer outside of init()"
-        _        -> loxError loc $ "Cannot call " <> typeOf e
+    where
+        initOutsideInit = loxError loc $ "Cannot call initializer outside of init()"
+        inStack :: HasStackFrame o => o -> LoxT a -> LoxT a
+        inStack o lox = do
+            let frame = stackFrame o
+            modify' $ \s -> s { stack = frame : stack s }
+            r <- lox
+            modify' $ \s -> s { stack = tail (stack s) }
+            return r
 
 eval (Array loc exprs) = mapM eval exprs >>= atomArray
 
@@ -435,7 +471,7 @@ apply loc (BuiltIn n _ fn) args
       where nameFunction (ArgumentError loc "" ts as) = throwError (ArgumentError loc n ts as)
             nameFunction e = throwError e
 
-apply _ (Function mname names rst body core env) args = do
+apply _ (Function sf names rst body core env) args = do
     old <- get -- snapshot the old environment
 
     -- setup the closed over environment
@@ -461,8 +497,7 @@ apply _ (Function mname names rst body core env) args = do
      catchReturn (LoxReturn _ v) = return v
      catchReturn (ArgumentError loc "" ts as) = throwError $ ArgumentError
                                                              loc
-                                                             (fromMaybe "<Anon>"
-                                                                        mname)
+                                                             (fst sf)
                                                              ts
                                                              as
      catchReturn e               = throwError e

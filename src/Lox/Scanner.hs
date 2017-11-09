@@ -20,7 +20,7 @@ type Scanner = State ScannerState ()
 
 data ScannerState = ScannerState
     { productions :: Tokens
-    , failed :: [ScanError]
+    , failed :: ![ScanError]
     , line :: !Int
     , char :: !Int
     } deriving (Show)
@@ -29,6 +29,14 @@ runScanner :: Scanner -> (Tokens, [ScanError])
 runScanner scanner = (reverse.productions &&& failed)
                    $ execState scanner
                    $ ScannerState [] [] 1 0
+
+tokens :: Text -> (Tokens, [ScanError])
+tokens src = runScanner (scan src)
+
+tokensFrom :: Int -> Text -> (Tokens, [ScanError])
+tokensFrom line src = (reverse.productions &&& failed)
+                      $ execState (scan src)
+                      $ ScannerState [] [] line 0
 
 type ScanError = (Int, Int, Text)
 type Tokens = [(Int, Int, Token)]
@@ -68,9 +76,6 @@ reservedWords = HS.fromList
     ,"while", "for", "in", "break", "continue"
     ,"nil"
     ]
-
-tokens :: Text -> (Tokens, [ScanError])
-tokens src = runScanner (scan src)
 
 scan :: Text -> Scanner
 scan = go . uncons
