@@ -23,6 +23,10 @@ library
                       ,Lox.Interpreter
                       ,Lox.Environment
                       ,Lox.Core.Array
+                      ,Lox.Builtins
+                      ,Lox.Builtins.Array
+                      ,Lox.Builtins.Object
+                      ,Lox.Builtins.Random
   build-depends:       base >= 4.7 && < 5
                      , text
                      , mtl
@@ -31,6 +35,7 @@ library
                      , clock
                      , readline
                      , vector
+                     , random
   default-language:    Haskell2010
 
 executable hlox-exe

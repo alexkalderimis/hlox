@@ -1,5 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Lox.Syntax where
 
@@ -13,32 +18,46 @@ import Data.Text hiding (length, reverse)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
 import Lox.Environment (Environment)
+import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.List as L
+import qualified Lox.Core.Array as A
 
+type Value = Either LoxException Atom
+type LoxResult a = IO (Either LoxException a)
 type VarName = Text
 type Env = Environment VarName Atom
+
+newtype Singleton = Singleton (IORef ())
+    deriving Eq
+
+instance Show Singleton where
+    show _ = "<id>"
 
 data SourceLocation = SourceLocation !Text !Int !Int
                     | SourceLocation :..: SourceLocation
                     | Unlocated
+                    | NativeCode
     deriving (Eq, Show)
 
 range :: SourceLocation -> ((Text, Int, Int), (Text, Int, Int))
 range (SourceLocation t l c) = ((t, l, c),(t, l, c))
 range (start :..: end) = (fst (range start), snd (range end))
-range Unlocated = (("No File", 0, 0), ("No File", 0, 0))
+range Unlocated = let r = ("No File", 0, 0) in (r, r)
+range NativeCode = let r = ("Native-Code", 0, 0) in (r, r)
 
 type Program = [Statement]
 
 class Located a where
     sourceLoc :: a -> SourceLocation
 
-data LoxExecption = LoxError SourceLocation String
+data LoxException = LoxError SourceLocation String
                   | FieldNotFound SourceLocation VarName
                   | LoxReturn SourceLocation Atom
                   | LoxBreak SourceLocation
                   | LoxContinue SourceLocation
+                  | ArgumentError SourceLocation
+                                  [String] [Atom]
                   deriving (Show)
 
 data Statement = While SourceLocation Expr Statement
@@ -111,16 +130,15 @@ instance Located Expr where
     sourceLoc (Array loc _) = loc
 
 -- Native function that supports errors and IO
-type NativeFn = [Atom] -> IO (Either LoxExecption Atom)
+type NativeFn = [Atom] -> LoxResult Atom
 
 data Callable = Function [VarName] Statement Env
-              | BuiltIn Int NativeFn
-              | BuiltInMethod Int NativeFn
+              | BuiltIn (Int -> Bool) NativeFn
 
-arity :: Callable -> Int
-arity (Function args _ _) = length args
-arity (BuiltIn i _) = i
-arity (BuiltInMethod i _) = i
+-- is this arity acceptable to this function?
+arity :: Callable -> Int -> Bool
+arity (Function args _ _) n = length args == n
+arity (BuiltIn p _)       n = p n
 
 instance Show Callable where
     show (Function args body _) = "(Function " <> show args
@@ -135,46 +153,63 @@ data Atom = LoxNil
           | LoxClass Class
           | LoxObj Object 
           | LoxArray AtomArray
+          | LoxIter Stepper
           deriving (Show)
 
-newtype AtomArray = AtomArray { unArray :: IORef (Vector Atom) }
+data Stepper = forall a. Stepper a (a -> LoxResult (Maybe Atom, a))
+
+instance Show Stepper where
+    show _ = "Iterator"
+
+newtype AtomArray = AtomArray (A.Array Atom)
 
 instance Show AtomArray where
-    show a = "AtomArray"
+    show _ = "AtomArray"
+
+arrayFromList :: (Monad m, MonadIO m) => [Atom] -> m AtomArray
+arrayFromList xs = AtomArray <$> liftIO (A.fromList LoxNil xs)
 
 nil :: Atom -> Bool
 nil LoxNil = True
 nil _ = False
 
 readArray :: MonadIO m => AtomArray -> m (Vector Atom)
-readArray = liftIO . readIORef . unArray
+readArray (AtomArray xs) = liftIO $ A.readArray xs
 
 type Methods = HM.HashMap VarName Callable
 
+-- closed set of protocols with special syntactic sugar:
+data Protocol = Settable -- a[i]            --> apply fn [a, i]
+              | Gettable -- a[i] = b        --> apply fn [a, i, b]
+              | Iterable -- for (i in a) {} --> apply fn [a]
+              deriving (Show, Eq, Generic)
+instance Hashable Protocol
+
 data Class = Class
-    { classId :: Int
+    { classId :: Singleton
     , className :: VarName
     , superClass :: Maybe Class
     , initializer :: Maybe Callable
     , staticMethods :: Methods
     , methods :: Methods
+    , protocols :: HM.HashMap Protocol Callable
     } deriving (Show)
 
 emptyClass :: Class
-emptyClass = Class (-1) "" Nothing Nothing mempty mempty
+emptyClass = Class (unsafePerformIO $ newSingleton)
+                   "" Nothing Nothing mempty mempty mempty
 
 data Object = Object
-    { objectId :: Int
-    , objectClass :: Class
+    { objectClass :: Class
     , objectFields :: IORef (HM.HashMap VarName Atom)
     }
 
 instance Eq Object where
-    a == b = objectId a == objectId b
+    a == b = objectFields a == objectFields b
 
 instance Show Object where
-    show o = mconcat ["<", unpack (className $ objectClass o)
-                     ,"@", show (objectId o)
+    show o = mconcat ["<Instance of "
+                     , unpack (className $ objectClass o)
                      ,">"
                      ]
 
@@ -198,3 +233,14 @@ data BinaryOp = Equals
               deriving (Generic, Show, Eq)
 
 instance Hashable BinaryOp -- requires Generic
+
+newSingleton :: IO Singleton
+newSingleton = Singleton <$> newIORef ()
+
+unsafeSingleton :: () -> Singleton
+unsafeSingleton = unsafePerformIO . fmap Singleton . newIORef
+
+-- for use in native modules
+argumentError :: [String] -> [Atom] -> LoxResult Atom
+argumentError types = return . Left . ArgumentError NativeCode types
+

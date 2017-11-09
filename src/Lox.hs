@@ -22,6 +22,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
 import Lox.Language
+import Lox.Builtins (builtins)
 
 data Error = Error Int Text Text
     deriving (Show)
@@ -48,7 +49,8 @@ runFile fileName = do
       Left e  -> do parseError e
                     exitFailure
       Right p -> do env <- builtins
-                    res <- evalLoxT (runProgram p) (interpreter env)
+                    s <- interpreter env
+                    res <- evalLoxT (runProgram p) s
                     case res of
                       Left e -> do putStr "[RUNTIME ERROR] "
                                    putStrLn (pack $ show e)
@@ -56,7 +58,7 @@ runFile fileName = do
                       Right _ -> return ()
 
 runPrompt :: IO ()
-runPrompt = welcome >> (interpreter <$> builtins) >>= go replOpts
+runPrompt = welcome >> builtins >>= interpreter >>= go replOpts
     where
         exit = putStrLn "Goodbye!"
         
@@ -152,7 +154,7 @@ parseError e = case e of
                        in if l == r then point a b c
                                     else point a b c <> " - " <> point d e f
 
-runtimeError :: LoxExecption -> IO ()
+runtimeError :: LoxException -> IO ()
 runtimeError LoxBreak{} = return ()
 runtimeError LoxContinue{} = return ()
 runtimeError LoxReturn{} = return ()

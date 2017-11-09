@@ -23,7 +23,6 @@ import Data.Maybe (isJust)
 import Data.Monoid
 import Data.Text (Text)
 import Data.Traversable
-import System.Clock
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.List as L
@@ -32,33 +31,45 @@ import qualified Data.Vector as V
 import           Data.Vector ((!?))
 
 import Lox.Syntax
+import qualified Lox.Core.Array as A
+
 import Lox.Environment (
     declare, assign, resolve, deref, enterScope, enterScopeWith, inCurrentScope)
 
-type Value = Either LoxExecption Atom
 type BinaryFn = (Atom -> Atom -> LoxT Atom)
 
 data Interpreter = Interpreter
     { bindings :: !Env
     , warnings :: !(HS.HashSet Text)
     , initialising :: !Bool
-    , currentId :: !Int
+    , object :: !Class -- the base class all classes must inherit from
+    , array :: !Class -- the class of arrays
     }
 
-interpreter :: Env -> Interpreter
-interpreter env = Interpreter env mempty False 0
+interpreter :: Env -> IO Interpreter
+interpreter env = 
+    Interpreter env mempty False <$> getClass "Object" <*> getClass "Array"
+    where
+        getClass c = do let mref = resolve c env
+                        case mref of
+                          Nothing -> return emptyClass
+                          Just ref -> do ma <- deref ref
+                                         case ma of
+                                           Just (LoxClass cls) -> return cls
+                                           _                   -> return emptyClass
 
 -- we require two effects in the interpreter:
 -- * statefulness of the bindings
 -- * exception handing
-type LoxT a = StateT Interpreter (ExceptT LoxExecption IO) a
+type LoxT a = StateT Interpreter (ExceptT LoxException IO) a
 
 class Monad m => MonadLox m where
     printLox :: Atom -> m ()
 
 instance MonadLox IO where
     printLox a = do
-        s <- runLoxT (stringify a) (interpreter mempty)
+        i <- interpreter mempty
+        s <- runLoxT (stringify a) i
         either (error . show) putStrLn s
 
 instance (MonadLox m) => MonadLox (StateT s m) where
@@ -67,14 +78,14 @@ instance (MonadLox m) => MonadLox (StateT s m) where
 instance MonadLox m => MonadLox (ExceptT e m) where
     printLox a = lift (printLox a)
 
-runLoxT :: LoxT a -> Interpreter -> IO (Either LoxExecption a)
+runLoxT :: LoxT a -> Interpreter -> LoxResult a
 runLoxT lox s = runExceptT $ evalStateT lox s
 
-evalLoxT :: LoxT a -> Interpreter -> IO (Either LoxExecption (a, Interpreter))
+evalLoxT :: LoxT a -> Interpreter -> LoxResult (a, Interpreter)
 evalLoxT lox s = runExceptT $ runStateT lox s
 
 run :: Env -> Program -> IO Value
-run env program = runLoxT (runProgram program) (interpreter env)
+run env program = interpreter env >>= runLoxT (runProgram program)
 
 runProgram :: Program -> LoxT Atom
 runProgram = foldM runStatement LoxNil
@@ -109,7 +120,8 @@ exec (ClassDecl loc name msuper methods) = do
     exec (Declare loc name)
     env <- gets bindings
     parent <- sequence $ fmap (findSuperClass env) msuper
-    classId <- nextId
+    classId <- liftIO newSingleton
+    base <- gets object
 
     let constructors = [ Function args body env | (Constructor args body) <- methods]
         statics      = [(n, Function as b env)  | (StaticMethod n as b) <- methods]
@@ -123,10 +135,11 @@ exec (ClassDecl loc name msuper methods) = do
 
     let cls = LoxClass $ Class { classId = classId
                                , className = name
-                               , superClass = parent
+                               , superClass = parent <|> Just base
                                , initializer = constructor
                                , staticMethods = (HM.fromList statics)
                                , methods = (HM.fromList instances)
+                               , protocols = mempty
                                }
     liftIO $ assign name cls env
     return cls
@@ -135,8 +148,8 @@ exec (ClassDecl loc name msuper methods) = do
         findSuperClass env name = do
             ma <- maybe undef (liftIO . deref) (resolve name env)
             case ma of
-              Nothing -> undef
               Just (LoxClass c) -> return c
+              Nothing -> undef
               Just a -> loxError loc $ "Cannot inherit from " <> typeOf a
         undef = loxError loc $ "Could not find super-class " <> show name
 
@@ -169,7 +182,7 @@ exec (Iterator loc loopVar e body) = do
     (old, env) <- modEnv enterScope
 
     obj <- eval e
-    Stepper a next <- iteratee (sourceLoc e) obj
+    Stepper a next <- iterable (sourceLoc e) obj
     env <- liftIO (declare loopVar env)
     putEnv env
 
@@ -179,7 +192,7 @@ exec (Iterator loc loopVar e body) = do
     return LoxNil
     where
         loop env next a = do
-            (ma, a') <- next a
+            (ma, a') <- fromLoxResult (sourceLoc e) (next a)
             case ma of
               Nothing -> return LoxNil
               Just curr -> do
@@ -187,23 +200,17 @@ exec (Iterator loc loopVar e body) = do
                   exec body
                   loop env next a'
 
-data Stepper = forall a. Stepper a (a -> LoxT (Maybe Atom, a))
+fromLoxResult :: SourceLocation -> LoxResult a -> LoxT a
+fromLoxResult loc r = liftIO r >>= either (locateError loc) return
 
-iteratee :: SourceLocation -> Atom -> LoxT Stepper
-
-iteratee loc (LoxArray arr) = do
-    vs <- readArray arr
-    let seed   = (0 :: Int)
-        next i = return (vs !? i, succ i)
-    return $ Stepper seed next
-
-iteratee loc (LoxObj Object{..}) = do
-    keys <- fmap LoxString . HM.keys <$> liftIO (readIORef objectFields)
-    let next []     = return (Nothing, [])
-        next (k:ks) = return (Just k, ks)
-    return $ Stepper keys next
-
-iteratee loc a = loxError loc $ "Cannot iterate over objects of type " <> typeOf a
+iterable :: SourceLocation -> Atom -> LoxT Stepper
+iterable loc a = do
+    fn <- lookupProtocol Iterable a
+          >>= maybe (loxError loc $ "Cannot iterate over " <> typeOf a) return
+    r <- apply loc fn [a]
+    case r of
+      (LoxIter it) -> return it
+      wrong -> loxError loc $ "Iterator must return iterable, got " <> typeOf wrong
 
 eval :: Expr -> LoxT Atom
 
@@ -219,21 +226,11 @@ eval (GetField loc e field) = do
           case superClass (objectClass obj) of
             Nothing -> loxError loc "No super-class"
             Just sup -> return (LoxObj obj{ objectClass = sup })
-      (LoxObj Object{..}) -> do
-          hm <- liftIO (readIORef objectFields)
-          case HM.lookup field hm of
-            Nothing -> gets bindings >>= getMethod objectClass inst
-            Just v -> return v
-      (LoxArray arr) -> gets bindings >>= getMethod arrayClass inst
-      _ -> loxError loc $ "Cannot access field of " <> typeOf inst
+      _ -> do getter <- lookupProtocol Gettable inst
+                        >>= maybe (cannotGet inst) return
+              apply loc getter [inst, LoxString field]
     where
-        fieldNotFound = throwError $ FieldNotFound (simplify loc) field
-        getMethod cls inst env = do
-            case HM.lookup field (methods cls) of
-              Nothing -> case superClass cls of
-                           Nothing -> fieldNotFound
-                           Just sup -> getMethod sup inst env
-              Just fn -> LoxFn <$> bind [("this", inst)] fn
+        cannotGet x = loxError loc $ "Cannot read fields of " <> typeOf x
 
 eval (Index loc e ei) = do
     o <- eval e
@@ -310,35 +307,19 @@ eval (Assign loc (SetIdx lhs idx) e) = do
     target <- eval lhs
     k <- eval idx
     v <- eval e
-    case (target, k) of
-      -- no attempts are made to optimise the representation of sparse arrays
-      -- thus assigning to very large indices will result in the allocation of
-      -- large very sparse arrays
-      (LoxArray arr, LoxNum n) -> do
-          let i = floor n
-          vs <- readArray arr
-          let vs' = if i < V.length vs
-                    then vs
-                    else let needed = i - V.length vs + 1
-                         in vs <> V.replicate needed LoxNil
-          liftIO $ writeIORef (unArray arr) (vs' V.// [(i, v)])
-          return v
-      -- basic object field setting
-      (LoxObj Object{objectFields = fs}, LoxString k) -> assignField fs k v >> return v
-      -- everything else is a failure
-      _ -> do idx <- stringify k
-              loxError loc $ unwords ["Cannot assign", typeOf v
-                                     ,"to a", typeOf target
-                                     ,"at", idx
-                                     ]
-    where assignField fs k v = liftIO (modifyIORef fs (HM.insert k v))
+    setter <- lookupProtocol Settable target
+              >>= maybe (cannotSet target) return
+    apply loc setter [target, k, v]
+    return v
+    where
+        cannotSet a = loxError loc $ "Cannot assign fields on " <> typeOf a
 
 eval (Assign loc (Set lhs fld) e) = do
     v <- eval e
     o <- eval lhs
     case o of
       LoxObj Object{objectFields=fs} -> assignField fs v >> return v
-      _                    -> loxError loc ("Cannot assign to " <> typeOf o)
+      _  -> loxError loc ("Cannot assign to " <> typeOf o)
     where
         assignField fs v = liftIO (modifyIORef fs (HM.insert fld v))
 
@@ -354,16 +335,15 @@ eval (Call loc callee args) = do
         _        -> loxError loc $ "Cannot call " <> typeOf e
 
 eval (Array loc exprs) = do
-    as <- V.fromList <$> mapM eval exprs
-    r <- liftIO $ newIORef as
-    return (LoxArray (AtomArray r))
+    as <- mapM eval exprs >>= liftIO . A.fromList LoxNil
+    return (LoxArray (AtomArray as))
 
 init :: SourceLocation -> Object -> [Atom] -> LoxT ()
 init loc obj args = construct obj args
     where
         construct = case initializer (objectClass obj) of
             Nothing -> defaultConstr
-            Just fn -> (\o args -> do bound <- bind [("this", LoxObj o)] fn
+            Just fn -> (\o args -> do bound <- bindThis (LoxObj o) fn
                                       apply loc bound args
                                       return ())
                                           
@@ -372,35 +352,38 @@ init loc obj args = construct obj args
                                               ,"Expected", show n
                                               ]
 
+
+lookupProtocol :: Protocol -> Atom -> LoxT (Maybe Callable)
+lookupProtocol p a = do
+    mcls <- classOf a
+    return (mcls >>= HM.lookup p . protocols)
+
+classOf :: Atom -> LoxT (Maybe Class)
+classOf (LoxObj o) = return (Just $ objectClass o)
+classOf (LoxArray _) = Just <$> gets array
+classOf _ = return Nothing
+
 instantiate :: SourceLocation -> Class -> [Atom] -> LoxT Atom
 instantiate loc cls args = do
-    objId <- nextId
-    obj   <- liftIO (new objId cls)
+    obj   <- liftIO (new cls)
     initialise (init loc obj args)
     return (LoxObj $ obj)
 
-new :: Int -> Class -> IO Object
-new i cls = Object i cls <$> newIORef HM.empty
+new :: Class -> IO Object
+new cls = Object cls <$> newIORef HM.empty
 
-bind :: [(VarName, Atom)] -> Callable -> LoxT Callable
-bind xs (Function ns body env) = Function ns body <$> liftIO (enterScopeWith xs env)
-bind [("this", this)] (BuiltInMethod n fn) = return $ BuiltIn n (\args -> fn (this : args))
-bind _ fn = return fn
+bindThis :: Atom -> Callable -> LoxT Callable
+bindThis this (BuiltIn ar fn)
+  = return $ BuiltIn (\n -> ar (n + 1)) (\args -> fn (this : args))
+bindThis this (Function ns body env)
+  = Function ns body <$> liftIO (enterScopeWith [("this", this)] env)
 
 apply :: SourceLocation -> Callable -> [Atom] -> LoxT Atom
-apply loc fn args | arity fn /= length args = loxError loc msg
+apply loc fn args | not (arity fn (length args)) = loxError loc msg
     where
-        msg = concat ["Wrong number of arguments. "
-                     , show (arity fn)
-                     ,"arguments required"
-                     ]
+        msg = "Wrong number of arguments."
 
-apply loc (BuiltIn _ fn) args = liftIO (fn args)
-                                >>= either (locateError loc) return 
-
-apply loc (BuiltInMethod _ fn) args = do this <- eval (Var loc "this")
-                                         ret <- liftIO (fn (this:args))
-                                         either (locateError loc) return ret
+apply loc (BuiltIn _ fn) args = fromLoxResult loc (fn args)
 
 apply _ (Function names body env) args = do
    old <- gets bindings
@@ -419,92 +402,10 @@ apply _ (Function names body env) args = do
 warn :: SourceLocation -> Text -> LoxT ()
 warn loc msg = modify' $ \s -> s { warnings = HS.insert (locS <> msg) (warnings s) }
     where ((f1, l1, c1), (f2, l2, c2)) = range loc
-          locS = mconcat ["(line ", T.pack (show l1), ",", T.pack (show c1)
-                         ," .. line ", T.pack (show l2), ",", T.pack (show c2)
+          locS = mconcat ["(", T.pack (show l1), ",", T.pack (show c1), ")"
+                         ," - (", T.pack (show l2), ",", T.pack (show c2)
                          ,") "
                          ]
-
-builtins :: IO Env
-builtins = do
-    math <- Object (succ $ classId baseClass) baseClass
-                <$> newIORef (HM.fromList maths)
-
-    enterScopeWith (("Math", LoxObj math) : vals) mempty
-
-    where vals = [("clock", LoxFn (BuiltIn 0 clock))
-                 ,("Object", LoxClass baseClass)
-                 ,("Array", LoxClass arrayClass)
-                 ]
-
-baseClass :: Class
-baseClass = emptyClass { className = "Object"
-                       , classId = (-1000)
-                       , staticMethods = HM.fromList [("keys", (BuiltIn 1 objectKeys))]
-                       }
-
-arrayClass :: Class
-arrayClass = baseClass { className = "Array"
-                       , classId = (-1001)
-                       , methods = HM.fromList methods
-                       , staticMethods = HM.fromList statics
-                       }
-    where
-        statics = [("range", BuiltIn 2
-                             (\[from, to] -> case (from, to) of
-                                               (LoxNum a, LoxNum b) -> do
-                                                   let vs = fmap LoxNum $ V.enumFromN a (floor b - floor a)
-                                                   Right . LoxArray . AtomArray <$> newIORef vs
-                                               _ -> return (Left $ LoxError Unlocated "bad args")))
-                  ]
-
-        methods = [("fold", BuiltInMethod 2
-                            (\[vs, acc, f] ->
-                                case (vs, f) of
-                                  (LoxArray arr, LoxFn fn) -> do
-                                      let s = interpreter mempty
-                                          f m a = apply Unlocated fn [m, a]
-                                          lox = readArray arr >>= V.foldM f acc
-                                      runLoxT lox s
-                                  _ -> return (Left $ LoxError Unlocated "bad args")))
-
-                  ,("filter",
-                           BuiltInMethod 1
-                           (\[vs, f] -> case (vs, f) of
-                              (LoxArray arr, LoxFn fn) -> do
-                                  let s = interpreter mempty
-                                      f a = truthy <$> apply Unlocated fn [a]
-                                      lox = readArray arr >>= V.filterM f >>= loxArray
-                                  runLoxT lox s
-                              _ -> return (Left $ LoxError Unlocated "bad args")))
-                  ,("map", BuiltInMethod 1
-                           (\[vs, f] -> case (vs, f) of
-                                          (LoxArray arr, LoxFn fn) -> do
-                                              let s = interpreter mempty
-                                                  f a = apply Unlocated fn [a]
-                                                  lox = readArray arr >>= mapM f >>= loxArray
-                                              runLoxT lox s
-                                          _ -> return (Left $ LoxError Unlocated "bad args")))]
-
-maths :: [(VarName, Atom)]
-maths = [("pi", LoxNum $ realToFrac pi)
-        ,("sin", LoxFn (BuiltIn 1 (mathsFn sin)))
-        ,("cos", LoxFn (BuiltIn 1 (mathsFn cos)))
-        ,("tan", LoxFn (BuiltIn 1 (mathsFn tan)))
-        ]
-    where mathsFn f [LoxNum n] = return (Right $ LoxNum $ realToFrac $ f $ realToFrac n)
-          mathsFn _ [a] = return (Left $ LoxError Unlocated $ "Required num, got: " <> typeOf a)
-
-clock :: NativeFn
-clock _ = fmap (Right . LoxNum . (/ 1e9) . realToFrac . toNanoSecs)
-        $ getTime Realtime
-
-objectKeys :: NativeFn
-objectKeys [LoxObj Object{..}] = do
-    hm <- liftIO $ readIORef objectFields
-    vs <- newIORef (V.fromList $ fmap LoxString $ HM.keys hm)
-    return (Right $ LoxArray $ AtomArray $ vs)
-objectKeys [x] = do
-    return (Left $ LoxError Unlocated $ "Cannot read keys of " <> typeOf x)
 
 truthy :: Atom -> Bool
 truthy LoxNil      = False
@@ -546,7 +447,7 @@ stringify (LoxObj Object{..}) = do
     fs <- HM.toList <$> liftIO (readIORef objectFields)
     fs' <- mapM (sequence . second stringify) fs
     return $ concat
-           $ ["<", T.unpack (className objectClass), "[", show objectId, "] "]
+           $ ["<", T.unpack (className objectClass), " "]
              ++ L.intersperse " " [T.unpack k <> "=" <> v | (k, v) <- fs']
              ++ [">"]
 stringify (LoxArray arr) = do
@@ -566,8 +467,8 @@ isInteger d = d == fromInteger (floor d)
 
 binaryFns :: HashMap BinaryOp BinaryFn
 binaryFns = HM.fromList
-    [(Equals,        lb (== EQ))
-    ,(NotEquals,     lb (/= EQ))
+    [(Equals,        (\a b -> LoxBool       <$> (a === b)))
+    ,(NotEquals,     (\a b -> LoxBool . not <$> (a === b)))
     ,(LessThan,      lb (== LT))
     ,(LessThanEq,    lb (/= GT))
     ,(GreaterThan,   lb (== GT))
@@ -581,6 +482,11 @@ binaryFns = HM.fromList
     ]
     where lb f a b = LoxBool . f <$> a <=> b
 
+(===) :: Atom -> Atom -> LoxT Bool
+(LoxObj a)   === (LoxObj b)   = return (a == b)
+(LoxClass a) === (LoxClass b) = return (a == b)
+a            === b            = fmap (== EQ) (a <=> b)
+
 (<=>) :: Atom -> Atom -> LoxT Ordering
 LoxNil        <=> LoxNil = return EQ
 LoxNil        <=> _      = return LT
@@ -588,8 +494,6 @@ _             <=> LoxNil = return GT
 (LoxBool a)   <=> (LoxBool b)   = return (a `compare` b)
 (LoxNum a)    <=> (LoxNum b)    = return (a `compare` b)
 (LoxString a) <=> (LoxString b) = return (a `compare` b)
-(LoxClass a)  <=> (LoxClass b)  = return (classId a `compare` classId b)
-(LoxObj a)    <=> (LoxObj b)    = return (objectId a `compare` objectId b)
 (LoxArray a)  <=> (LoxArray b)  = do
     as <- readArray a
     bs <- readArray b
@@ -626,14 +530,8 @@ modEnv f = do old <- gets bindings
               let new = f old
               (old, new) <$ putEnv new
 
-nextId :: LoxT Int
-nextId = do c <- gets currentId
-            modify' $ \s -> s { currentId = succ c }
-            return c
-
-locateError :: SourceLocation -> LoxExecption -> LoxT a
+locateError :: SourceLocation -> LoxException -> LoxT a
 locateError loc (LoxError Unlocated e) = loxError loc e
+locateError loc (ArgumentError NativeCode ts as)
+  = throwError (ArgumentError loc ts as)
 locateError _  e                      = throwError e
-
-loxArray :: V.Vector Atom -> LoxT Atom
-loxArray vs = LoxArray . AtomArray <$> liftIO (newIORef vs)

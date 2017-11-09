@@ -7,9 +7,14 @@ module Lox.Language (
                     ) where
 
 import Lox.Scanner (Token(..), Tokens, tokens)
-import Lox.Syntax (Env, LoxExecption(..), Expr(..), Statement(..), Program, Atom(..), SourceLocation(..), range, nil)
-import Lox.Parser (tokenStream, expression, program, ParseError(..), Parser(runParser))
+import Lox.Syntax (
+    Env, LoxException(..),
+    Expr(..), Statement(..),
+    Program, Value, LoxResult,
+    Atom(..), SourceLocation(..), range, nil)
+import Lox.Parser (
+    tokenStream, expression, program, ParseError(..), Parser(runParser))
 import Lox.Environment (Environment(..), declare, assign, enterScope, readEnv)
 import Lox.Interpreter (
-    LoxT, Value, Interpreter(..), interpreter,
-    printLox, builtins, eval, run, runProgram, runLoxT, evalLoxT)
+    LoxT, Interpreter(..), interpreter,
+    printLox, eval, run, runProgram, runLoxT, evalLoxT)

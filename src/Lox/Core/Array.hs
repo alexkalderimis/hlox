@@ -20,13 +20,16 @@ import qualified Data.Vector.Mutable as Vector
 -- new elements with when we grow it.
 -- The mutable vector is itself encapsulated in a ref so that
 -- we may dynamically resize it.
-data Array a = Array a (IORef Int) (IORef (Vector.IOVector a))
+data Array a = Array a !(IORef Int) !(IORef (Vector.IOVector a))
 
 empty :: a -> IO (Array a)
 empty a = new a 0
 
 new :: a -> Int -> IO (Array a)
 new a n = Array a <$> newIORef n <*> (Vector.replicate n a >>= newIORef)
+
+size :: Array a -> IO Int
+size (Array _ n _) = readIORef n
 
 readArray :: (Array a) -> IO (V.Vector a)
 readArray (Array _ n' xs) = do
