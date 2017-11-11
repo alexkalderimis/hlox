@@ -11,9 +11,14 @@ import Control.Applicative
 import Data.Text hiding (null, empty, group, reverse)
 import qualified Data.Vector as V
 
-import Lox.Syntax
+import Lox.Syntax hiding (Statement, Expr, Method)
 import Lox.Scanner (Tokens, Token(..))
 import Debug.Trace
+
+-- here we parse literals, not all possible values
+type Statement = Statement' VarName Literal
+type Expr = Expr' VarName Literal
+type Method = Method' VarName Literal
 
 data ParserState = ParserState
     { tokens :: !Tokens
@@ -67,7 +72,7 @@ backtrack msg = Parser $ \s -> (Left (Recoverable (location s) msg), s)
 fatal :: Text -> Parser a
 fatal msg = Parser $ \s -> (Left (Fatal (location s) msg), s)
 
-program :: Parser Program
+program :: Parser Parsed
 program = many declaration <* eof
 
 eof :: Parser ()
@@ -93,7 +98,7 @@ classDeclaration = do
     expect RIGHT_BRACE
     end <- loc
 
-    return (ClassDecl (start :..: end) className superClass methods)
+    return (ClassDecl (start :..: end) className className superClass methods)
 
 method :: Parser Method
 method = constructor <|> staticMethod <|> instanceMethod
@@ -181,7 +186,7 @@ returnStatement = do
     if not b then fatal "Cannot return outside a function body"
              else do l <- loc
                      mval <- optional expression
-                     return (Return l (fromMaybe (Literal l LoxNil) mval))
+                     return (Return l (fromMaybe (Literal l LitNil) mval))
 
 loopControl :: Parser Statement
 loopControl = do
@@ -230,7 +235,7 @@ oldStyleForLoop = do
 
     let here = (start :..: end)
         while = While here
-                      (fromMaybe (Literal here (LoxBool True)) mcond)
+                      (fromMaybe (Literal here (LitBool True)) mcond)
                       (Block here (body : maybeToList mpost))
     return (Block here (maybeToList minit <> [while]))
 
@@ -421,7 +426,7 @@ fnExpr = do
     return (Lambda (start :..: end) Nothing args body)
 
 atom :: Parser Expr
-atom = ident <|> array <|> mapping <|> p <|> group
+atom = ident <|> array <|> mapping <|> literal <|> group
   where
       ident = do t <- next
                  l <- loc
@@ -454,16 +459,17 @@ atom = ident <|> array <|> mapping <|> p <|> group
                   expect COLON
                   v <- assignment
                   return (k, v)
-      p = do
+      literal = do
             t <- next
             l <- loc
             a <- case t of
-                STRING s -> return $ LoxString  s
-                NUMBER n -> return $ LoxNum (realToFrac n)
+                STRING s -> return $ LitString  s
+                NUMBER n -> return $ LitDbl n
+                INT n    -> return $ LitInt n
                 KEYWORD kw -> case kw of
-                                "true" -> return $ LoxBool True
-                                "false" -> return $ LoxBool False
-                                "nil" -> return $ LoxNil
+                                "true" -> return $ LitBool True
+                                "false" -> return $ LitBool False
+                                "nil" -> return $ LitNil
                                 _ -> backtrack ("Unexpected keyword " <> pack (show kw))
                 _ -> backtrack ("Unexpected token " <> pack (show t))
             return (Literal l a)

@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 
 -- Lox has mutable arrays, supporting indexed reads and writes
 -- 
@@ -7,6 +8,7 @@ module Lox.Core.Array where
 
 import Prelude hiding (reverse, foldl)
 
+import Data.Data (Typeable, Data)
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef

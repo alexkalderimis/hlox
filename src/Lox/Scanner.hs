@@ -25,12 +25,14 @@ data ScannerState = ScannerState
     , char :: !Int
     } deriving (Show)
 
+type Code = Text
+
 runScanner :: Scanner -> (Tokens, [ScanError])
 runScanner scanner = (reverse.productions &&& failed)
                    $ execState scanner
                    $ ScannerState [] [] 1 0
 
-tokens :: Text -> (Tokens, [ScanError])
+tokens :: Code -> (Tokens, [ScanError])
 tokens src = runScanner (scan src)
 
 tokensFrom :: Int -> Text -> (Tokens, [ScanError])
@@ -59,6 +61,7 @@ data Token =
     -- Literals.
     | IDENTIFIER Text
     | STRING Text
+    | INT Int
     | NUMBER Double
 
     -- Keywords.
@@ -167,8 +170,8 @@ number i rst = do
             scan rst'''
         mr -> do
             let num = singleton i <> integral
-            case Read.double num of
-                Right (d,_) -> addToken (NUMBER d)
+            case Read.decimal num of
+                Right (i,_) -> addToken (INT i)
                 Left e -> addError (pack e)
             advanceN (length num)
             go mr

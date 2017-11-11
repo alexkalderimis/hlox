@@ -47,27 +47,29 @@ arrayMethods = [(n, BuiltIn ("Array::" <> n) a f) | (BuiltIn n a f) <- fns]
         single n = BuiltIn n (== 1)
 
 getElement :: NativeFn
-getElement [LoxArray (AtomArray arr), LoxNum i] | i >= 0 = do
+getElement [xs, LoxDbl i] = getElement [xs, LoxInt (round i)]
+getElement [LoxArray (AtomArray arr), LoxInt i] | i >= 0 = do
     n <- A.size arr
-    if i < realToFrac n
-       then Right <$> A.get (floor i) arr
+    if i < n
+       then Right <$> A.get i arr
        else return . Left . LoxError NativeCode
-            $ "index (" <> show (floor i) <> ") not in range"
+            $ "index (" <> show i <> ") not in range"
 getElement [this@LoxArray{}, LoxString k] = do
     case HM.lookup k (methods array) of
       Nothing -> return . Left $ FieldNotFound Unlocated k
       Just fn -> run (LoxFn <$> bindThis this fn)
-
-getElement [LoxArray _, LoxNum i]
+getElement [LoxArray _, LoxInt i]
     = return . Left . LoxError NativeCode
       $ "negative array index"
 getElement args = argumentError ["Array", "Number"] args
 
 setElement :: NativeFn
-setElement [LoxArray (AtomArray arr), LoxNum i, e]
-  | i >= 0    = Right e <$ A.set (floor i) e arr
+setElement [xs, LoxDbl i, e] = setElement [xs, LoxInt (round i), e]
+setElement [LoxArray (AtomArray arr), LoxInt i, e]
+  | i >= 0    = Right e <$ A.set i e arr
   | otherwise = return . Left . LoxError NativeCode
                 $ "negative array index"
+
 setElement args = argumentError ["Array", "Number", "Any"] args
 
 -- iterator takes a read-only snapshot of the array
@@ -82,15 +84,18 @@ iterator [LoxArray arr] = do
 
 inclusiveRange :: NativeFn
 
-inclusiveRange [LoxNum from, LoxNum to] | from <= to = do
-    xs <- A.range (floor from) (floor to)
-          >>= A.map LoxNil (return . LoxNum . realToFrac)
+inclusiveRange [LoxInt from, LoxInt to] | from <= to = do
+    xs <- A.range from to >>= A.map LoxNil (return . LoxInt)
     done xs
-
-inclusiveRange [LoxNum from, LoxNum to]
+inclusiveRange [LoxDbl from, LoxDbl to] =
+    inclusiveRange [LoxInt (round from), LoxInt (round to)]
+inclusiveRange [from, LoxDbl to] =
+    inclusiveRange [from, LoxInt (round to)]
+inclusiveRange [LoxDbl from, to] =
+    inclusiveRange [LoxInt (round from), to]
+inclusiveRange [LoxInt from, LoxInt to]
     = return . Left . LoxError NativeCode
     $ "Expected (A, B) where B >= A, got " <> show from <> " and " <> show to
-
 inclusiveRange args = argumentError ["Number", "Number"] args
 
 foldArray :: NativeFn
@@ -128,22 +133,22 @@ popArray [LoxArray (AtomArray arr)] = do
 arraySize :: NativeFn
 arraySize [LoxArray (AtomArray arr)] = do
     i <- A.size arr
-    return . Right . LoxNum $ fromIntegral i
+    return . Right . LoxInt $ fromIntegral i
 
 inPlaceSort :: NativeFn
 inPlaceSort [LoxArray (AtomArray xs)] = do
     run (A.sort (<=>) xs >> return LoxNil)
 
-run :: LoxT Atom -> LoxResult Atom
+run :: LoxT LoxVal -> LoxResult LoxVal
 run lox = interpreter mempty >>= runLoxT lox
 
-inPlace :: (Array Atom -> IO ()) -> NativeFn
+inPlace :: (Array LoxVal -> IO ()) -> NativeFn
 inPlace f [LoxArray (AtomArray arr)] = Right LoxNil <$ f arr
 inPlace _ args = argumentError ["Array"] args
 
 -- boilerplate removal
-done :: Array Atom -> LoxResult Atom
+done :: Array LoxVal -> LoxResult LoxVal
 done = return . Right . fromArray
 
-fromArray :: Array Atom -> Atom
+fromArray :: Array LoxVal -> LoxVal
 fromArray = LoxArray . AtomArray

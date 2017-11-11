@@ -15,45 +15,30 @@ random = emptyClass
     , classId = unsafeSingleton ()
     , superClass = Just O.baseClass
     , staticMethods = HM.fromList
-                      [("int", BuiltIn "Random.int" arity  randomInt)
-                      ,("float", BuiltIn "Random.float" arity randomFloat)
-                      ,("char", BuiltIn "Random.char" arity randomChar)
+                      [("int", BuiltIn "Random.int" (== 0) randomInt)
+                      ,("float", BuiltIn "Random.float" (== 0) randomFloat)
+                      ,("char", BuiltIn "Random.char" (== 0) randomChar)
+                      ,("range", BuiltIn "Random.range" (== 2) randomRange)
                       ]
     }
 
-arity :: Int -> Bool
-arity = (`elem` [0, 2])
-
 randomInt :: NativeFn
-
-randomInt [] = do
-    i <- randomIO
-    return . Right . LoxNum $ realToFrac (i :: Int)
-
-randomInt [LoxNum a, LoxNum b] = do
-    i <- randomRIO (floor a, floor b)
-    return . Right . LoxNum $ realToFrac (i :: Int)
+randomInt _ = Right . LoxInt <$> randomIO
 
 randomFloat :: NativeFn
-
-randomFloat [] = do
-    i <- randomIO
-    return . Right . LoxNum $ realToFrac (i :: Double)
-
-randomFloat [LoxNum a, LoxNum b] = do
-    i <- randomRIO (realToFrac a, realToFrac b)
-    return . Right . LoxNum $ realToFrac (i :: Double)
+randomFloat _ = Right . LoxDbl <$> randomIO
 
 randomChar :: NativeFn
+randomChar _ = Right . LoxString . T.singleton <$> randomIO
 
-randomChar [] = do
-    c <- randomIO
-    return . Right . LoxString $ T.singleton c
-
-randomChar [LoxString a, LoxString b] = do
+randomRange :: NativeFn
+randomRange [LoxInt a, LoxInt b] = Right . LoxInt <$> randomRIO (a, b)
+randomRange [LoxDbl a, LoxDbl b] = Right . LoxDbl <$> randomRIO (a, b)
+randomRange [LoxInt a, LoxDbl b] = Right . LoxDbl <$> randomRIO (fromIntegral a, b)
+randomRange [LoxDbl a, LoxInt b] = Right . LoxDbl <$> randomRIO (a, fromIntegral b)
+randomRange [LoxString a, LoxString b] = do
     let a' = T.unpack a
         b' = T.unpack b
     case (a', b') of
       ([from], [to]) -> Right . LoxString . T.singleton <$> randomRIO (from, to)
       _ -> return . Left $ LoxError NativeCode "Arguments must be single characters"
-

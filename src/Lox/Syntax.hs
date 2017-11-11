@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -16,6 +19,7 @@ import Data.Hashable (Hashable)
 import Data.IORef
 import Data.Monoid
 import Data.Text hiding (unwords, length, reverse)
+import Data.Data (Typeable, Data)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
 import Lox.Environment (Environment)
@@ -26,10 +30,10 @@ import qualified Data.Text as T
 
 import qualified Lox.Core.Array as A
 
-type Value = Either LoxException Atom
+type Value = Either LoxException LoxVal
 type LoxResult a = IO (Either LoxException a)
 type VarName = Text
-type Env = Environment VarName Atom
+type Env = Environment VarName LoxVal
 
 type StackFrame = (VarName, SourceLocation)
 
@@ -56,7 +60,7 @@ data SourceLocation = SourceLocation !Text !Int !Int
                     | SourceLocation :..: SourceLocation
                     | Unlocated
                     | NativeCode
-    deriving (Eq, Show)
+    deriving (Eq, Show, Data, Typeable)
 
 range :: SourceLocation -> ((Text, Int, Int), (Text, Int, Int))
 range (SourceLocation t l c) = ((t, l, c),(t, l, c))
@@ -65,44 +69,55 @@ range Unlocated = let r = ("No File", 0, 0) in (r, r)
 range NativeCode = let r = ("Native-Code", 0, 0) in (r, r)
 
 type Program = [Statement]
+type Parsed = [Statement' VarName Literal]
+
+-- turn a parse tree into something we can interpret
+fromParsed :: Parsed -> Program
+fromParsed = fmap (fmap asValue)
 
 class Located a where
     sourceLoc :: a -> SourceLocation
 
-data LoxException = LoxError SourceLocation String
+type LoxException = LoxException' LoxVal
+data LoxException' a = LoxError SourceLocation String
                   | FieldNotFound SourceLocation VarName
-                  | LoxReturn SourceLocation Atom
+                  | LoxReturn SourceLocation a
                   | LoxBreak SourceLocation
                   | LoxContinue SourceLocation
-                  | UserError SourceLocation Atom
+                  | UserError SourceLocation a
                   | ArgumentError SourceLocation 
-                                  VarName [String] [Atom]
-                  | StackifiedError [StackFrame] LoxException
-                  deriving (Show)
+                                  VarName [String] [a]
+                  | StackifiedError [StackFrame] (LoxException' a)
+                  deriving (Show, Data, Typeable)
 
-data Statement = While SourceLocation Expr Statement
-               | DefineFn SourceLocation VarName Arguments Statement
-               | Define SourceLocation VarName Expr
-               | Declare SourceLocation VarName
-               | ExprS Expr
-               | Print SourceLocation Expr
-               | Block SourceLocation [Statement]
-               | Break SourceLocation
-               | Continue SourceLocation
-               | Return SourceLocation Expr
-               | If SourceLocation Expr Statement (Maybe Statement)
-               | ClassDecl SourceLocation VarName (Maybe VarName) [Method]
-               | Iterator SourceLocation VarName Expr Statement
-               | Throw SourceLocation Expr
-               | Try SourceLocation Statement [(VarName, Statement)]
-            deriving (Show)
+type Statement = Statement' VarName LoxVal
 
-data Method = Constructor Arguments Statement
-            | StaticMethod VarName Arguments Statement
-            | InstanceMethod VarName Arguments Statement
-            deriving (Show)
+data Statement' v a
+    = Block SourceLocation [Statement' v a]
+    | Break SourceLocation
+    | ClassDecl SourceLocation VarName v (Maybe v) [Method' v a]
+    | Continue SourceLocation
+    | Declare SourceLocation v
+    | Define SourceLocation v (Expr' v a)
+    | DefineFn SourceLocation v (Arguments' v) (Statement' v a)
+    | ExprS (Expr' v a)
+    | If SourceLocation (Expr' v a) (Statement' v a) (Maybe (Statement' v a))
+    | Iterator SourceLocation v (Expr' v a) (Statement' v a)
+    | Print SourceLocation (Expr' v a)
+    | Return SourceLocation (Expr' v a)
+    | Throw SourceLocation (Expr' v a)
+    | Try SourceLocation (Statement' v a) [(v, (Statement' v a))]
+    | While SourceLocation (Expr' v a) (Statement' v a)
+    deriving (Show, Data, Typeable, Functor)
 
-instance Located Statement where
+type Method = Method' VarName LoxVal
+data Method' v a
+    = Constructor (Arguments' v) (Statement' v a)
+    | StaticMethod VarName (Arguments' v) (Statement' v a)
+    | InstanceMethod VarName (Arguments' v) (Statement' v a)
+    deriving (Show, Functor, Data, Typeable)
+
+instance Located (Statement' v a) where
     sourceLoc (While loc _ _) = loc
     sourceLoc (DefineFn loc _ _ _) = loc
     sourceLoc (Declare loc _) = loc
@@ -113,35 +128,40 @@ instance Located Statement where
     sourceLoc (Continue loc) = loc
     sourceLoc (Return loc _) = loc
     sourceLoc (If loc _ _ _) = loc
-    sourceLoc (ClassDecl loc _ _ _) = loc
+    sourceLoc (ClassDecl loc _ _ _ _) = loc
     sourceLoc (Iterator loc _ _ _) = loc
     sourceLoc (Throw loc _) = loc
     sourceLoc (Try loc _ _) = loc
 
-data LVal = LVar VarName
-          | Set Expr VarName
-          | SetIdx Expr Expr
-          deriving (Show)
+type LVal = LVal' VarName LoxVal
+data LVal' v a
+    = LVar v
+    | Set (Expr' v a) VarName
+    | SetIdx (Expr' v a) (Expr' v a)
+    deriving (Show, Functor, Data, Typeable)
 
-type Arguments = ([VarName], Maybe VarName)
+type Arguments = Arguments' VarName
+type Arguments' v = ([v], Maybe v)
 
-data Expr = Literal SourceLocation Atom
-          | Grouping SourceLocation Expr
-          | Var SourceLocation VarName
-          | Negate SourceLocation Expr
-          | Not SourceLocation Expr
-          | Binary BinaryOp Expr Expr
-          | IfThenElse SourceLocation Expr Expr Expr
-          | Assign SourceLocation LVal Expr
-          | Call SourceLocation Expr [Expr]
-          | Lambda SourceLocation (Maybe VarName) Arguments Statement
-          | GetField SourceLocation Expr VarName
-          | Index SourceLocation Expr Expr
-          | Array SourceLocation [Expr]
-          | Mapping SourceLocation [(VarName, Expr)]
-          deriving (Show)
+type Expr = Expr' VarName LoxVal
+data Expr' v a
+    = Literal SourceLocation a
+    | Grouping SourceLocation (Expr' v a)
+    | Var SourceLocation v
+    | Negate SourceLocation (Expr' v a)
+    | Not SourceLocation (Expr' v a)
+    | Binary BinaryOp (Expr' v a) (Expr' v a)
+    | IfThenElse SourceLocation (Expr' v a) (Expr' v a) (Expr' v a) 
+    | Assign SourceLocation (LVal' v a) (Expr' v a)
+    | Call SourceLocation (Expr' v a) [Expr' v a]
+    | Lambda SourceLocation (Maybe VarName) (Arguments' v) (Statement' v a)
+    | GetField SourceLocation (Expr' v a) VarName
+    | Index SourceLocation (Expr' v a) (Expr' v a)
+    | Array SourceLocation [Expr' v a]
+    | Mapping SourceLocation [(VarName, Expr' v a)]
+    deriving (Show, Functor, Data, Typeable)
 
-instance Located Expr where
+instance Located (Expr' v a) where
     sourceLoc (Literal loc _) = loc
     sourceLoc (Grouping loc _) = loc
     sourceLoc (Var loc _) = loc
@@ -158,7 +178,7 @@ instance Located Expr where
     sourceLoc (Mapping loc _) = loc
 
 -- Native function that supports errors and IO
-type NativeFn = [Atom] -> LoxResult Atom
+type NativeFn = [LoxVal] -> LoxResult LoxVal
 
 -- functions carry around references to Object and Array
 -- which lets us use literal notation.
@@ -184,21 +204,45 @@ instance Show Callable where
                                                  ]
     show (BuiltIn n _ _) = "[NativeCode " <> T.unpack n <> "]"
 
-data Atom = LoxNil
-          | LoxBool Bool
-          | LoxNum Nano
-          | LoxString Text
-          | LoxFn Callable
-          | LoxClass Class
-          | LoxObj Object 
-          | LoxArray AtomArray
-          | LoxIter Stepper
-          deriving (Show)
+-- out of the parse stage there is a limited set of values that
+-- may be instantiated.
+data Literal
+    = LitNil
+    | LitBool !Bool
+    | LitInt !Int
+    | LitDbl !Double
+    | LitString !Text
+    deriving (Show, Data, Typeable)
 
-typeOf :: Atom -> String
+-- lift literals to values
+asValue :: Literal -> LoxVal
+asValue lit = case lit of
+                LitNil      -> LoxNil
+                LitBool b   -> LoxBool b
+                LitInt i    -> LoxInt i
+                LitDbl n    -> LoxDbl n
+                LitString t -> LoxString t
+
+data LoxVal
+    -- Atomic values
+    = LoxNil
+    | LoxBool Bool
+    | LoxInt Int
+    | LoxDbl Double
+    | LoxString Text
+    -- Composite stuff
+    | LoxFn Callable
+    | LoxClass Class
+    | LoxObj Object 
+    | LoxArray AtomArray
+    | LoxIter Stepper
+    deriving (Show)
+
+typeOf :: LoxVal -> String
 typeOf LoxNil = "nil"
 typeOf (LoxBool _) = "Boolean"
-typeOf (LoxNum _) = "Number"
+typeOf (LoxInt _) = "Number"
+typeOf (LoxDbl _) = "Number"
 typeOf (LoxString _) = "String"
 typeOf (LoxFn _) = "Function"
 typeOf (LoxClass _) = "Class"
@@ -206,24 +250,24 @@ typeOf (LoxObj _) = "Object"
 typeOf (LoxArray _) = "Array"
 typeOf (LoxIter _) = "Iterator"
 
-data Stepper = forall a. Stepper a (a -> LoxResult (Maybe Atom, a))
+data Stepper = forall a. Stepper a (a -> LoxResult (Maybe LoxVal, a))
 
 instance Show Stepper where
     show _ = "Iterator"
 
-newtype AtomArray = AtomArray (A.Array Atom)
+newtype AtomArray = AtomArray (A.Array LoxVal)
 
 instance Show AtomArray where
     show _ = "AtomArray"
 
-arrayFromList :: (Monad m, MonadIO m) => [Atom] -> m AtomArray
+arrayFromList :: (Monad m, MonadIO m) => [LoxVal] -> m AtomArray
 arrayFromList xs = AtomArray <$> liftIO (A.fromList LoxNil xs)
 
-nil :: Atom -> Bool
+nil :: LoxVal -> Bool
 nil LoxNil = True
 nil _ = False
 
-readArray :: MonadIO m => AtomArray -> m (Vector Atom)
+readArray :: MonadIO m => AtomArray -> m (Vector LoxVal)
 readArray (AtomArray xs) = liftIO $ A.readArray xs
 
 type Methods = HM.HashMap VarName Callable
@@ -232,7 +276,7 @@ type Methods = HM.HashMap VarName Callable
 data Protocol = Settable -- a[i]            --> apply fn [a, i]
               | Gettable -- a[i] = b        --> apply fn [a, i, b]
               | Iterable -- for (i in a) {} --> apply fn [a]
-              deriving (Show, Eq, Generic)
+              deriving (Show, Eq, Generic, Data, Typeable)
 instance Hashable Protocol
 
 data Class = Class
@@ -256,7 +300,7 @@ instance Located Class where
 
 data Object = Object
     { objectClass :: Class
-    , objectFields :: IORef (HM.HashMap VarName Atom)
+    , objectFields :: IORef (HM.HashMap VarName LoxVal)
     }
 
 instance Eq Object where
@@ -285,7 +329,7 @@ data BinaryOp = Equals
               | Or
               | Seq
               | Mod
-              deriving (Generic, Show, Eq)
+              deriving (Generic, Show, Eq, Data, Typeable)
 
 instance Hashable BinaryOp -- requires Generic
 
@@ -296,6 +340,11 @@ unsafeSingleton :: () -> Singleton
 unsafeSingleton = unsafePerformIO . fmap Singleton . newIORef
 
 -- for use in native modules
-argumentError :: [String] -> [Atom] -> LoxResult Atom
+argumentError :: [String] -> [LoxVal] -> LoxResult LoxVal
 argumentError types = return . Left . ArgumentError NativeCode "" types
 
+simplify :: SourceLocation -> SourceLocation
+simplify Unlocated = Unlocated
+simplify loc = let (l@(a, b, c), r@(d, e, f)) = range loc
+                in if l == r then SourceLocation a b c
+                             else SourceLocation a b c :..: SourceLocation d e f

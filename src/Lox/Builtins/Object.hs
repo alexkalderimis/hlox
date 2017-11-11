@@ -62,7 +62,7 @@ getField [LoxObj inst@Object{..}, LoxString k] = do
       Nothing -> getMethod objectClass inst k
       Just v -> return (Right v)
 
-getMethod :: Class -> Object -> VarName -> LoxResult Atom
+getMethod :: Class -> Object -> VarName -> LoxResult LoxVal
 getMethod cls inst k = do
     case HM.lookup k (methods cls) of
       Nothing -> case superClass cls of
@@ -79,5 +79,5 @@ setField [LoxObj Object{..}, LoxString k, v] =
 
 setField args = argumentError ["Object", "String", "Any"] args
 
-run :: LoxT Atom -> LoxResult Atom
+run :: LoxT LoxVal -> LoxResult LoxVal
 run lox = interpreter mempty >>= runLoxT lox

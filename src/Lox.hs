@@ -52,7 +52,8 @@ runFile fileName = do
                     exitFailure
       Right p -> do env <- builtins
                     s <- interpreter env
-                    res <- evalLoxT (runProgram p) s
+                    let prog = fromParsed p
+                    res <- evalLoxT (runProgram prog) s
                     case res of
                       Left e -> do putStr "[RUNTIME ERROR] "
                                    putStrLn (pack $ show e)
@@ -131,9 +132,10 @@ run' i ReplOpts{..} intS code = do
     case fst parsed of
       Left e  -> do parseError e
                     return intS
-      Right p -> do let lox = runProgram p
+      Right p -> do let prog = fromParsed p
+                        lox = runProgram prog
                     when showResult $ putStrLn "=== OUTPUT"
-                    res <- evalLoxT (runProgram p)
+                    res <- evalLoxT lox
                                     (intS { bindings = enterScope (bindings intS) })
                     case res of
                       Left e -> do runtimeError e
@@ -151,7 +153,7 @@ run' i ReplOpts{..} intS code = do
                               mapM_ (putStrLn . ("[WARNING] " <>)) (warnings s)
                           recordIt v s
 
-printBindings :: [HashMap Text Atom] -> IO ()
+printBindings :: [HashMap Text LoxVal] -> IO ()
 printBindings [] = return ()
 printBindings (m:ms) = do
     putStrLn "-------------"
@@ -211,7 +213,7 @@ renameIts (Environment ms) = Environment (go ms 0)
                             n' = maybe n (const (succ n)) mx
                         in m' : go ms n'
 
-recordIt :: Atom -> Interpreter -> IO Interpreter
+recordIt :: LoxVal -> Interpreter -> IO Interpreter
 recordIt LoxNil s = return $ s { bindings = removeEmptyScopes (bindings s) }
 recordIt v s = do env <- declare "it" (enterScope $ bindings s)
                   assign "it" v env

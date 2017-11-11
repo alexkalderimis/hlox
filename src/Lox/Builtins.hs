@@ -25,7 +25,7 @@ builtins = enterScopeWith vals mempty
                  ,("Math", LoxObj maths)
                  ]
 
-classes :: [Class] -> [(VarName, Atom)]
+classes :: [Class] -> [(VarName, LoxVal)]
 classes cs = [(className c, LoxClass c) | c <- cs]
 
 errorCls :: Class
@@ -42,7 +42,7 @@ setErrorMsg [LoxObj Object{..}, msg] = do
     return (Right LoxNil)
 
 clock :: NativeFn
-clock _ = fmap (Right . LoxNum . (/ 1e9) . realToFrac . toNanoSecs)
+clock _ = fmap (Right . LoxDbl . (/ 1e9) . fromInteger . toNanoSecs)
         $ getTime Realtime
 
 applyFun [LoxFn fn, LoxArray as] = run $ do
@@ -54,15 +54,15 @@ maths :: Object
 maths = Object O.baseClass (unsafePerformIO $ newIORef (HM.fromList flds))
     where
        flds = 
-            [("pi",  LoxNum $ realToFrac pi)
-            ,("sin", LoxFn (BuiltIn "Math.sin" (== 1) (mathsFn sin)))
-            ,("cos", LoxFn (BuiltIn "Math.cos" (== 1) (mathsFn cos)))
-            ,("tan", LoxFn (BuiltIn "Math.tan" (== 1) (mathsFn tan)))
-            ]
-       mathsFn f [LoxNum n] = return (Right . LoxNum $ call f n)
+           [("pi",  LoxDbl pi)
+           ,("sin", LoxFn (BuiltIn "Math.sin" (== 1) (mathsFn sin)))
+           ,("cos", LoxFn (BuiltIn "Math.cos" (== 1) (mathsFn cos)))
+           ,("tan", LoxFn (BuiltIn "Math.tan" (== 1) (mathsFn tan)))
+           ]
+       mathsFn f [LoxDbl n] = return (Right . LoxDbl $ f n)
+       mathsFn f [LoxInt n] = mathsFn f [LoxDbl $ fromIntegral n]
        mathsFn _ args = return (Left $ ArgumentError NativeCode "" ["Number"] args)
-       call f = realToFrac . f . realToFrac
 
-run :: LoxT Atom -> LoxResult Atom
+run :: LoxT LoxVal -> LoxResult LoxVal
 run lox = interpreter mempty >>= runLoxT lox
 

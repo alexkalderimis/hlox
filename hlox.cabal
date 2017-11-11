@@ -27,9 +27,12 @@ library
                       ,Lox.Builtins.Array
                       ,Lox.Builtins.Object
                       ,Lox.Builtins.Random
+                      ,Lox.Transform
   build-depends:       base >= 4.7 && < 5
                      , text
                      , mtl
+                     , syb
+                     , uniplate
                      , hashable
                      , unordered-containers
                      , clock
