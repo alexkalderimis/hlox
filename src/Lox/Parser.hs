@@ -4,11 +4,13 @@
 
 module Lox.Parser where
 
+import Prelude hiding (span)
+
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
 import Control.Applicative
-import Data.Text hiding (null, empty, group, reverse)
+import Data.Text hiding (span, null, empty, group, reverse)
 import qualified Data.Vector as V
 
 import Lox.Syntax hiding (Statement, Expr, Method)
@@ -98,7 +100,7 @@ classDeclaration = do
     expect RIGHT_BRACE
     end <- loc
 
-    return (ClassDecl (start :..: end) className className superClass methods)
+    return (ClassDecl (span start end) className className superClass methods)
 
 method :: Parser Method
 method = constructor <|> staticMethod <|> instanceMethod
@@ -122,7 +124,7 @@ functionDefinition = do
     body <- functionBody EQUAL
     end <- loc
 
-    return (DefineFn (start :..: end) var args body)
+    return (DefineFn (span start end) var args body)
 
 functionBody :: Token -> Parser Statement
 functionBody tok = returning $
@@ -153,7 +155,7 @@ varDefinition = do
     expect EQUAL
     e <- expression
     end <- loc
-    return (Define (start :..: end) var e)
+    return (Define (span start end) var e)
 
 varDeclaration :: Parser Statement
 varDeclaration = do
@@ -161,7 +163,7 @@ varDeclaration = do
     start <- loc
     IDENTIFIER var <- next
     end <- loc
-    return (Declare (start :..: end) var)
+    return (Declare (span start end) var)
 
 statement :: Parser Statement
 statement = do
@@ -208,7 +210,7 @@ ifStatement = do
     whenTrue <- statement
     whenFalse <- optional (expect (KEYWORD "else") >> statement)
     end <- loc
-    return (If (start :..: end) condition whenTrue whenFalse)
+    return (If (span start end) condition whenTrue whenFalse)
 
 whileStatement :: Parser Statement
 whileStatement = do
@@ -217,7 +219,7 @@ whileStatement = do
     condition <- predicate <|> fatal "expected a predicate in while"
     body <- breaking statement <|> fatal "expected a statement"
     end <- loc
-    return (While (start :..: end) condition body)
+    return (While (span start end) condition body)
 
 oldStyleForLoop :: Parser Statement
 oldStyleForLoop = do
@@ -233,7 +235,7 @@ oldStyleForLoop = do
     body <- breaking statement
     end <- loc
 
-    let here = (start :..: end)
+    let here = (span start end)
         while = While here
                       (fromMaybe (Literal here (LitBool True)) mcond)
                       (Block here (body : maybeToList mpost))
@@ -251,7 +253,7 @@ newStyleForLoop = do
     body <- breaking statement
     end <- loc
 
-    let here = start :..: end
+    let here = span start end
     return (Iterator here loopVar iteree body)
 
 predicate :: Parser Expr
@@ -267,7 +269,7 @@ printStatement = do
     start <- loc
     e <- expression <|> fatal "print statement without expression"
     end <- loc
-    return (Print (start :..: end) e)
+    return (Print (span start end) e)
 
 throwStatement :: Parser Statement
 throwStatement = do
@@ -275,7 +277,7 @@ throwStatement = do
     start <- loc
     e <- expression <|> fatal "throw statement without expression"
     end <- loc
-    return (Throw (start :..: end) e)
+    return (Throw (span start end) e)
 
 tryCatchStatement :: Parser Statement
 tryCatchStatement = do
@@ -284,7 +286,7 @@ tryCatchStatement = do
     dodgy <- blockStatement
     handlers <- many catchHandler
     end <- loc
-    return (Try (start :..: end) dodgy handlers)
+    return (Try (span start end) dodgy handlers)
     where
         catchHandler = do
             keyword "catch"
@@ -301,7 +303,7 @@ blockStatement = do
     sts <- many declaration
     expect RIGHT_BRACE
     end <- loc
-    return (Block (start :..: end) sts)
+    return (Block (span start end) sts)
 
 expressionStatement :: Parser Statement
 expressionStatement = ExprS <$> expression
@@ -331,7 +333,7 @@ assignment = do
             lhs <- lval
             expect EQUAL
             e <- assignment <|> fatal "missing expression after ="
-            return (Assign (here :..: sourceLoc e) lhs e)
+            return (Assign (here `span` sourceLoc e) lhs e)
         lval = do
             lhs <- call
             case lhs of
@@ -350,7 +352,7 @@ ifThenElse = do
     expect (KEYWORD "else")
     b <- expression <|> fatal "no else-expression in if-then-else expression"
     end <- loc
-    return (IfThenElse (start :..: end) p a b)
+    return (IfThenElse (span start end) p a b)
 
 booleans :: Parser Expr
 booleans = binary [(KEYWORD "and", And), (KEYWORD "or", Or)] equality
@@ -380,8 +382,8 @@ unary = p <|> fnExpr <|> call <|> atom
             e <- expression
             end <- loc
             case op of
-                BANG -> return (Not (start :..: end) e)
-                MINUS -> return (Negate (start :..: end) e)
+                BANG -> return (Not (span start end) e)
+                MINUS -> return (Negate (span start end) e)
 
 call :: Parser Expr
 call = atom >>= finishCall
@@ -393,16 +395,16 @@ call = atom >>= finishCall
                 idx <- expression
                 expect RIGHT_SQUARE
                 end <- loc
-                finishCall $ Index (sourceLoc e :..: end) e idx
+                finishCall $ Index (sourceLoc e `span` end) e idx
             Just LEFT_PAREN  -> do
                 args <- manySepBy COMMA assignment <* expect RIGHT_PAREN
                 end <- loc
-                finishCall $ Call (sourceLoc e :..: end) e args
+                finishCall $ Call (sourceLoc e `span` end) e args
             Just DOT -> do
                 meth <- is inMethod
                 name <- identifier <|> ("class" <$ keyword "class")
                 end <- loc
-                finishCall $ GetField (sourceLoc e :..: end) e name
+                finishCall $ GetField (sourceLoc e `span` end) e name
         super meth = do keyword "super"
                         if meth then return "super"
                                 else fatal "illegal reference to super outside method"
@@ -415,7 +417,7 @@ group = do
     e <- expression
     expect RIGHT_PAREN
     end <- loc
-    return (Grouping (start :..: end) e)
+    return (Grouping (span start end) e)
 
 fnExpr :: Parser Expr
 fnExpr = do
@@ -423,7 +425,7 @@ fnExpr = do
     args <- arguments
     body <- functionBody EQUAL_GT
     end <- loc
-    return (Lambda (start :..: end) Nothing args body)
+    return (Lambda (span start end) Nothing args body)
 
 atom :: Parser Expr
 atom = ident <|> array <|> mapping <|> literal <|> group
@@ -444,13 +446,13 @@ atom = ident <|> array <|> mapping <|> literal <|> group
                  xs <- manySepBy COMMA assignment
                  expect RIGHT_SQUARE
                  end <- loc
-                 return $ Array (start :..: end) xs
+                 return $ Array (span start end) xs
       mapping = do expect LEFT_BRACE
                    start <- loc
                    ps <- manySepBy COMMA keyval
                    expect RIGHT_BRACE
                    end <- loc
-                   return $ Mapping (start :..: end) ps
+                   return $ Mapping (span start end) ps
       keyval = do k <- do t <- next
                           case t of
                             IDENTIFIER k -> return k
@@ -560,3 +562,6 @@ breaking pa = do
 
 tracePeek :: String -> Parser ()
 tracePeek mgs = Parser $ \s -> traceShow (mgs, listToMaybe $ tokens s) (Right (), s)
+
+span :: SourceLocation -> SourceLocation -> SourceLocation
+span a b = simplify (a :..: b)
