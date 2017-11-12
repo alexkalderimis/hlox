@@ -23,7 +23,6 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
 import Lox.Language
-import Lox.Environment (boundNames)
 import Lox.Builtins (builtins)
 
 data Error = Error Int Text Text
@@ -91,7 +90,7 @@ runPrompt = do
               Just ":a" -> loop (opts{ showAST = not (showAST opts) }) env
               Just ":s" -> loop (opts{ showState = not (showState opts) }) env
               Just ":r" -> loop (opts{ showResult = not (showResult opts) }) env
-              Just ":env" -> do liftIO (readEnv (bindings env) >>= printBindings)
+              Just ":env" -> do liftIO (readEnv (bindings env) >>= printBindings.return)
                                 loop opts env
               Just code -> do env' <- liftIO (run' i opts env (pack code))
                               let ns = HS.toList $ boundNames (bindings env')
@@ -148,7 +147,7 @@ run' i ReplOpts{..} intS code = do
                               print v
                           when showState $ do
                               putStrLn "==== STATE"
-                              readEnv (bindings s) >>= printBindings
+                              readEnv (bindings s) >>= printBindings.return
                           when (not $ HS.null $ warnings s) $ do
                               mapM_ (putStrLn . ("[WARNING] " <>)) (warnings s)
                           recordIt v s
@@ -170,7 +169,7 @@ parseError e = case e of
     Recoverable loc msg -> putE loc msg
     where
         putE loc msg = putStrLn $ mconcat ["[SYNTAX ERROR] " ,niceLoc loc ," ", msg ]
-        point t l c = unwords [t, ":", pack (show l), "..", pack (show c)]
+        point t l c = mconcat [t, ": (", pack (show l), ",", pack (show c), ")"]
         niceLoc loc = let (l@(a, b, c), r@(d, e, f)) = range loc
                        in if l == r then point a b c
                                     else point a b c <> " - " <> point d e f
@@ -199,22 +198,8 @@ niceLoc loc = case range loc of
     where
     place (t, l, c) = t <> " (" <> pack (show l) <> "," <> pack (show c) <> ")"
 
-removeEmptyScopes :: Env -> Env
-removeEmptyScopes (Environment ms) = Environment (filter (not . HM.null) ms)
-
-renameIts :: Env -> Env
-renameIts (Environment ms) = Environment (go ms 0)
-    where go [] _ = []
-          go (m:ms) 0 = m : go ms (if HM.member "it" m then 1 else 0)
-          go (m:ms) n = let k = "it" <> pack (show n)
-                            oldKs = ["it", "it" <> pack (show $ pred n)]
-                            mx = getFirst $ foldMap (\k -> First $ HM.lookup k m) oldKs
-                            m' = maybe m (\x -> HM.insert k x (foldr HM.delete m oldKs)) mx
-                            n' = maybe n (const (succ n)) mx
-                        in m' : go ms n'
-
 recordIt :: LoxVal -> Interpreter -> IO Interpreter
-recordIt LoxNil s = return $ s { bindings = removeEmptyScopes (bindings s) }
+recordIt LoxNil s = return s
 recordIt v s = do env <- declare "it" (enterScope $ bindings s)
                   assign "it" v env
-                  return s { bindings = renameIts (removeEmptyScopes env) }
+                  return s { bindings = env }

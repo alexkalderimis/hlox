@@ -2,7 +2,7 @@ let xs = ["a", "b", "c", "d"]
 
 print xs[0]
 print xs[3]
-print xs[100]
+print xs[100] // nil
 
 for (x in xs) {
     print x + "!"

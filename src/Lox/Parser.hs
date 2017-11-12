@@ -236,10 +236,13 @@ oldStyleForLoop = do
     end <- loc
 
     let here = (span start end)
+    return (ForLoop here minit mcond mpost body)
+    {-
         while = While here
                       (fromMaybe (Literal here (LitBool True)) mcond)
                       (Block here (body : maybeToList mpost))
     return (Block here (maybeToList minit <> [while]))
+    -}
 
 newStyleForLoop :: Parser Statement
 newStyleForLoop = do
@@ -326,14 +329,8 @@ discard = binary [(COMMA, Seq)] assignment
 
 assignment :: Parser Expr
 assignment = do
-    assign' <|> ifThenElse <|> booleans
+    assign' <|> incOrDec <|> ifThenElse <|> booleans
     where
-        assign' = do
-            here <- loc
-            lhs <- lval
-            expect EQUAL
-            e <- assignment <|> fatal "missing expression after ="
-            return (Assign (here `span` sourceLoc e) lhs e)
         lval = do
             lhs <- call
             case lhs of
@@ -341,6 +338,20 @@ assignment = do
               (Index loc e idx) -> return (SetIdx e idx)
               (Var loc name) -> return (LVar name)
               _ -> empty
+        assign' = do
+            here <- loc
+            lhs <- lval
+            op <- (Nothing <$ expect EQUAL)
+                  <|> (Just Add <$ expect PLUSEQ)
+                  <|> (Just Subtract <$ expect MINUSEQ)
+            e <- assignment <|> fatal "missing RHS in assignment"
+            return (Assign (here `span` sourceLoc e) op lhs e)
+        incOrDec = do
+            here <- loc
+            lhs <- lval
+            op <- (Add <$ expect PLUSPLUS) <|> (Subtract <$ expect MINUSMINUS)
+            let rhs = Literal here $ LitInt 1
+            return (Assign here (Just op) lhs rhs)
 
 ifThenElse :: Parser Expr
 ifThenElse = do
@@ -428,7 +439,7 @@ fnExpr = do
     return (Lambda (span start end) Nothing args body)
 
 atom :: Parser Expr
-atom = ident <|> array <|> mapping <|> literal <|> group
+atom = ident <|> array <|> arrayRange <|> mapping <|> literal <|> group
   where
       ident = do t <- next
                  l <- loc
@@ -447,6 +458,15 @@ atom = ident <|> array <|> mapping <|> literal <|> group
                  expect RIGHT_SQUARE
                  end <- loc
                  return $ Array (span start end) xs
+      arrayRange =
+              do expect LEFT_SQUARE
+                 start <- loc
+                 a <- assignment
+                 expect DOT >> expect DOT
+                 b <- assignment
+                 expect RIGHT_SQUARE
+                 end <- loc
+                 return $ ArrayRange (span start end) a b
       mapping = do expect LEFT_BRACE
                    start <- loc
                    ps <- manySepBy COMMA keyval

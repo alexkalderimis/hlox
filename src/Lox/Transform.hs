@@ -21,7 +21,7 @@ import Lox.Syntax
 
 type ReplaceM = State (Int, HM.HashMap VarName Int)
 
-type Replaced = [Statement' Int Literal]
+type Replaced = [Statement' Name Literal]
 
 type Name = (VarName, Int)
 type St = Statement' Name Literal
@@ -31,7 +31,7 @@ type LV = LVal' Name Literal
 type Args = Arguments' Name
 
 renameVars :: Parsed -> Replaced
-renameVars p = fmap (mapVSt snd) $ evalState (renameVarsM p') (0, HM.empty)
+renameVars p = evalState (renameVarsM p') (0, HM.empty)
     where p' = fmap (mapVSt (\t -> (t, 0))) p
 
 renameVarsM :: [St] -> ReplaceM [St]
@@ -88,6 +88,13 @@ handleStatement (Iterator loc name expr stm) = do
     name' <- replaceName name
     stm' <- scoped (handleStatement stm)
     return (Iterator loc name' expr' stm')
+
+handleStatement (ForLoop loc before cond after body) = scoped $ do
+    before' <- traverse handleStatement before
+    cond' <- traverse handleExpr cond
+    after' <- traverse handleStatement after
+    body' <- handleStatement body
+    return (ForLoop loc before' cond' after' body')
 
 handleStatement (Try loc stm handlers) =
     Try loc <$> scoped (handleStatement stm)
@@ -151,6 +158,10 @@ mapVSt f stm = case stm of
     ExprS e -> ExprS (mapVE f e)
     If loc e a b -> If loc (mapVE f e) (mapVSt f a) (fmap (mapVSt f) b)
     Iterator loc v e s -> Iterator loc (f v) (mapVE f e) (mapVSt f s)
+    ForLoop loc me0 me1 me2 stm -> ForLoop loc (fmap (mapVSt f) me0)
+                                               (fmap (mapVE f) me1)
+                                               (fmap (mapVSt f) me0)
+                                               (mapVSt f stm)
     Print loc e -> Print loc (mapVE f e)
     Return loc e -> Return loc (mapVE f e)
     Throw loc e -> Throw loc (mapVE f e)
@@ -176,16 +187,17 @@ mapVE f e = case e of
     Not loc e -> Not loc (mapVE f e)
     Binary op a b -> Binary op (mapVE f a) (mapVE f b)
     IfThenElse loc p a b -> IfThenElse loc (mapVE f p) (mapVE f a) (mapVE f b)
-    Assign loc lval e -> let lhs = case lval of
+    Assign loc mop lval e -> let lhs = case lval of
                                     LVar v -> LVar (f v)
                                     Set e fld -> Set (mapVE f e) fld
                                     SetIdx e idx -> SetIdx (mapVE f e) (mapVE f idx)
-                         in Assign loc lhs (mapVE f e)
+                              in Assign loc mop lhs (mapVE f e)
     Call loc fn args -> Call loc (mapVE f fn) (fmap (mapVE f) args)
     Lambda loc nm args stm -> Lambda loc nm (mapVArg f args) (mapVSt f stm)
     GetField loc e fld -> GetField loc (mapVE f e) fld
     Index loc e i -> Index loc (mapVE f e) (mapVE f i)
     Array loc es -> Array loc (fmap (mapVE f) es)
+    ArrayRange loc a b -> ArrayRange loc (mapVE f a) (mapVE f b)
     Mapping loc flds -> Mapping loc [(fld, mapVE f e) | (fld, e) <- flds]
     _ -> unsafeCoerce e
 

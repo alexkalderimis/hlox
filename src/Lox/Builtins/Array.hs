@@ -4,6 +4,7 @@ module Lox.Builtins.Array (array) where
 
 import Data.Monoid
 import Data.Maybe
+import Data.String
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector as V
 import           Data.Vector ((!?))
@@ -52,8 +53,7 @@ getElement [LoxArray (AtomArray arr), LoxInt i] | i >= 0 = do
     n <- A.size arr
     if i < n
        then Right <$> A.get i arr
-       else return . Left . LoxError NativeCode
-            $ "index (" <> show i <> ") not in range"
+       else return . Left $ FieldNotFound NativeCode (fromString $ show i)
 getElement [this@LoxArray{}, LoxString k] = do
     case HM.lookup k (methods array) of
       Nothing -> return . Left $ FieldNotFound Unlocated k

@@ -1,6 +1,8 @@
-let r = 0;
-let xs = Array.range(0, 1000000)
+let limit = 1000000
+let xs = Array.range(0, limit)
 
+print "for loop"
+let r = 0;
 let start = clock()
 for (let i = 0; i <= 1000000; i = i + 1) {
     r = r + i
@@ -9,7 +11,17 @@ let end = clock()
 print r
 print end - start
 
+print "array fold"
 start = clock()
 print xs.fold(0, (a, b) => a + b)
 end = clock()
+print end - start
+
+print "for loop - using ++"
+start = clock(), r = 0
+for (let i = 0; i <= 1000000; i++) {
+    r += i
+}
+let end = clock()
+print r
 print end - start

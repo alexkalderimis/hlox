@@ -8,9 +8,10 @@ import qualified Data.HashMap.Strict as HM
 import System.IO.Unsafe (unsafePerformIO)
 import System.Clock
 import qualified Data.Vector as V
+import qualified Data.Text as T
 
 import Lox.Syntax
-import Lox.Environment (enterScopeWith)
+import Lox.SeqEnv (enterScopeWith)
 import Lox.Interpreter (LoxT, apply, runLoxT, interpreter)
 import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O
@@ -22,6 +23,7 @@ builtins = enterScopeWith vals mempty
                  ++
                  [("clock", LoxFn (BuiltIn "clock" (== 0) clock))
                  ,("apply", LoxFn (BuiltIn "apply" (== 2) applyFun))
+                 ,("typeof", LoxFn (BuiltIn "typeof" (== 1) typeofFn))
                  ,("Math", LoxObj maths)
                  ]
 
@@ -40,6 +42,9 @@ setErrorMsg :: NativeFn
 setErrorMsg [LoxObj Object{..}, msg] = do
     modifyIORef objectFields $ HM.insert "message" msg
     return (Right LoxNil)
+
+typeofFn :: NativeFn
+typeofFn [x] = return . Right . LoxString . T.pack $ typeOf x
 
 clock :: NativeFn
 clock _ = fmap (Right . LoxDbl . (/ 1e9) . fromInteger . toNanoSecs)

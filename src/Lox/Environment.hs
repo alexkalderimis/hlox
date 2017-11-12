@@ -19,8 +19,8 @@ type Ref a = IORef (Maybe a)
 type Scope k a = HashMap k (Ref a)
 newtype Environment k a = Environment { scopes :: [Scope k a] }
 
-readEnv :: Environment k a -> IO [HashMap k a]
-readEnv = mapM unScope . scopes
+readEnv :: (Eq k, Hashable k) => Environment k a -> IO (HashMap k a)
+readEnv = fmap HM.unions . mapM unScope . scopes
     where unScope = fmap (HM.mapMaybe id) . sequence . fmap deref
 
 instance Monoid (Environment k v) where

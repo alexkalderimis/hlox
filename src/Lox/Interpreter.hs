@@ -33,10 +33,11 @@ import qualified Data.Vector as V
 import           Data.Vector ((!?))
 
 import Lox.Syntax
+import Lox.Analyse (isAssignedIn)
 import qualified Lox.Core.Array as A
 
-import Lox.Environment (
-    declare, assign, resolve, deref, enterScope, enterScopeWith, inCurrentScope)
+import Lox.SeqEnv (
+    declare, assign, resolve, newRef, writeRef, deref, enterScope, enterScopeWith, inCurrentScope)
 
 type BinaryFn = (LoxVal -> LoxVal -> LoxT LoxVal)
 
@@ -122,7 +123,7 @@ exec (Try loc stm handlers) = exec stm `catchError` handleWith handlers
 
 exec (DefineFn loc v args body) = {-# SCC "exec-define-fun" #-} do
     exec (Declare loc v) -- functions can recurse, so declare before define
-    eval (Assign loc (LVar v) (Lambda loc (Just v) args body))
+    eval (Assign loc Nothing (LVar v) (Lambda loc (Just v) args body))
 
 exec (Define loc v e) = {-# SCC "exec-define" #-} do
     isBound <- gets (inCurrentScope v . bindings)
@@ -205,6 +206,43 @@ exec (Break l)    = throwError (LoxBreak l)
 exec (Continue l) = throwError (LoxContinue l)
 exec (Return l e) = throwError =<< (LoxReturn l <$> eval e)
 
+exec (ForLoop loc minit mcond mpost body) = 
+    case (minit, mcond, mpost) of
+      (Just (Define _ var e)
+        , (Just (Binary LessThanEq (Var _ var') limit))
+          , (Just (ExprS (Assign _ (Just Add) (LVar var'') (Literal _ (LoxInt 1))))))
+        | var == var' && var == var'' && var `notAssignedIn` body -> do
+            start <- eval e
+            limit <- eval limit
+            case (start, limit) of
+              (LoxInt i, LoxInt j) -> optimisedLoop i j var
+              _ -> asWhile
+      _ -> asWhile
+    where
+        loop = Literal loc (LoxBool True)
+        -- the optimised loop prevents most loop bookkeeping, and the 
+        -- 2 var lookups and one function application per loop that would be needed
+        optimisedLoop i j var = do
+            old <- gets bindings
+            env <- liftIO (declare var old)
+            ref <- maybe (loxError loc "Could not find declared var") return
+                   $ resolve var env
+            let it curr = do liftIO (writeRef ref (LoxInt curr))
+                             exec body `catchError` catchContinue
+            r <- (putEnv env >> (LoxNil <$ mapM_ it [i .. j]))
+                    `catchError` catchBreak
+            r <$ putEnv old
+        catchContinue (LoxContinue l) = return LoxNil
+        catchContinue e = throwError e
+        catchBreak (LoxBreak l) = return LoxNil
+        catchBreak e = throwError e
+        asWhile = do
+                  let while = While loc
+                              (fromMaybe loop mcond)
+                              (Block loc (body : maybeToList mpost))
+                      stms = maybeToList minit ++ [while]
+                  exec (Block loc stms)
+    
 exec (Iterator loc loopVar e body) = do
     (old, env) <- modEnv enterScope
 
@@ -254,6 +292,7 @@ handleWith (h:hs) e = do
 
 fromException :: LoxException -> LoxT LoxVal
 fromException (UserError _ e) = return e
+fromException (LoxError _ msg) = return (LoxString $ T.pack msg)
 fromException e = throwError e
 
 iterable :: SourceLocation -> LoxVal -> LoxT Stepper
@@ -285,6 +324,7 @@ eval (GetField loc e field) = {-# SCC "eval-get-field" #-} do
       _ -> do getter <- lookupProtocol Gettable inst
                         >>= maybe (cannotGet inst) return
               apply loc getter [inst, LoxString field]
+                `catchError` locateError loc
     where
         cannotGet x = loxError loc $ "Cannot read fields of " <> typeOf x
 
@@ -293,9 +333,11 @@ eval (Index loc e ei) = {-# SCC "eval-index" #-} do
     i <- eval ei
     getter <- lookupProtocol Gettable o
               >>= maybe (cannotGet o) return
-    apply loc getter [o, i]
+    apply loc getter [o, i] `catchError` onErr
     where
         cannotGet o = loxError loc $ "Cannot index " <> typeOf o
+        onErr (FieldNotFound _ _) = return LoxNil
+        onErr e = locateError loc e
 
 eval (Literal _ a) = {-# SCC "eval-literal" #-} pure a
 
@@ -346,34 +388,56 @@ eval (Var loc v) = {-# SCC "eval-var" #-} do
     where undef = loxError loc $ "Undefined variable: " <> show v
           uninit = loxError loc $ "Uninitialised variable: " <> show v
 
-eval (Assign loc (LVar v) e) = {-# SCC "eval-assign-var" #-} do
+eval (Assign loc mop (LVar v) e) = {-# SCC "eval-assign-var" #-} do
     x <- eval e
     env <- gets bindings
-    declared <- liftIO (assign v x env)
-    if not declared
-        then undeclared
-        else return x
+    ref <- maybe undeclared return (resolve v env)
+    case mop of
+      Nothing -> liftIO (writeRef ref x) >> return x
+      Just op -> do old <- fromMaybe LoxNil <$> liftIO (deref ref)
+                    fn <- maybe noop return $ HM.lookup op binaryFns
+                    x' <- fn old x
+                    liftIO (writeRef ref x')
+                    return x'
     where undeclared = loxError loc $ "Cannot set undeclared variable: " <> show v
+          noop = loxError loc $ "Unknown operator"
 
-eval (Assign loc (SetIdx lhs idx) e) = {-# SCC "eval-assign-idx" #-} do
+eval (Assign loc mop (SetIdx lhs idx) e) = {-# SCC "eval-assign-idx" #-} do
     target <- eval lhs
     k <- eval idx
     v <- eval e
     setter <- lookupProtocol Settable target
               >>= maybe (cannotSet target) return
-    apply loc setter [target, k, v]
-    return v
+    case mop of
+      Nothing -> apply loc setter [target, k, v] >> return v
+      Just op -> do
+          getter <- lookupProtocol Gettable target
+                    >>= maybe (cannotGet target) return
+          old <- apply loc getter [target, k] `catchError` locateError loc
+          fn <- maybe noop return $ HM.lookup op binaryFns
+          v' <- fn old v
+          apply loc setter [target, k, v']
+          return v'
     where
         cannotSet a = loxError loc $ "Cannot assign fields on " <> typeOf a
+        cannotGet a = loxError loc $ "Cannot read fields on " <> typeOf a
+        noop = loxError loc $ "Unknown operator"
 
-eval (Assign loc (Set lhs fld) e) = do
+eval (Assign loc mop (Set lhs fld) e) = do
     v <- eval e
     o <- eval lhs
     case o of
-      LoxObj Object{objectFields=fs} -> assignField fs v >> return v
+      LoxObj Object{objectFields=fs} -> assignField fs v
       _  -> loxError loc ("Cannot assign to " <> typeOf o)
     where
-        assignField fs v = liftIO (modifyIORef fs (HM.insert fld v))
+        noop = loxError loc $ "Unknown operator"
+        setFld fs v = liftIO (modifyIORef' fs (HM.insert fld v)) >> return v
+        assignField fs v = case mop of
+            Nothing -> setFld fs v
+            Just op -> do old <- (HM.lookup fld <$> liftIO (readIORef fs))
+                                  >>= maybe (throwError (FieldNotFound loc fld)) return
+                          fn <- maybe noop return $ HM.lookup op binaryFns
+                          fn old v >>= setFld fs
 
 eval (Call loc callee args) = {-# SCC "eval-fun-call" #-} do
     e <- eval callee
@@ -400,6 +464,11 @@ eval (Call loc callee args) = {-# SCC "eval-fun-call" #-} do
             return r
 
 eval (Array loc exprs) = mapM eval exprs >>= atomArray
+
+eval (ArrayRange loc expr expr') = do
+    cls <- gets array
+    eval (Call loc (GetField loc (Literal loc $ LoxClass cls) "range")
+                   [expr, expr'])
 
 eval (Mapping loc pairs) = do
     cls <- gets object
@@ -578,11 +647,21 @@ binaryFns = HM.fromList
     ,(Add,           addAtoms)
     ,(Subtract,      numericalFn "subtract" (-) (-))
     ,(Multiply,      numericalFn "multiply" (*) (*))
-    ,(Divide,        numericalFn "divide" (/) div)
+    ,(Divide,        divide)
     ,(Mod,           numericalFn "mod" ((fromIntegral .) . mod `on` floor) mod)
     ,(Seq,           (\a b -> a `seq` return b))
     ]
     where lb f a b = LoxBool . f <$> a <=> b
+          divide (LoxDbl n) (LoxDbl d) = return (LoxDbl (n/d))
+          divide (LoxInt n) (LoxInt d) = let f = (/) `on` fromIntegral
+                                          in return (LoxDbl (f n d))
+          divide (LoxInt n) (LoxDbl d) = return (LoxDbl $ fromIntegral n / d)
+          divide (LoxDbl n) (LoxInt d) = return (LoxDbl $ n / fromIntegral d)
+          divide a          b          = throw' $ concat ["Cannot divide "
+                                                         , typeOf a
+                                                         , " by "
+                                                         , typeOf b
+                                                         ]
 
 (===) :: LoxVal -> LoxVal -> LoxT Bool
 (LoxObj a)   === (LoxObj b)   = return (a == b)
@@ -634,3 +713,6 @@ locateError loc (LoxError Unlocated e) = loxError loc e
 locateError loc (ArgumentError NativeCode n ts as)
   = throwError (ArgumentError (simplify loc) n ts as)
 locateError _  e                      = throwError e
+
+notAssignedIn :: VarName -> Statement -> Bool
+notAssignedIn var stm = not (var `isAssignedIn` stm)

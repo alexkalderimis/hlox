@@ -3,7 +3,7 @@ module Lox.Language (
     module Lox.Parser,
     module Lox.Interpreter,
     module Lox.Syntax,
-    module Lox.Environment,
+    module Lox.SeqEnv,
     simpleParse -- for use in ghci
                     ) where
 
@@ -15,7 +15,7 @@ import Lox.Syntax (
     LoxVal(..), SourceLocation(..), fromParsed, typeOf, range, nil)
 import Lox.Parser (
     tokenStream, expression, program, ParseError(..), Parser(runParser))
-import Lox.Environment (Environment(..), declare, assign, enterScope, readEnv)
+import Lox.SeqEnv (Environment(..), declare, assign, enterScope, readEnv, boundNames)
 import Lox.Interpreter (
     LoxT, Interpreter(..), interpreter,
     printLox, eval, run, runProgram, runLoxT, evalLoxT)

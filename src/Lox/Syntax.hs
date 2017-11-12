@@ -22,7 +22,7 @@ import Data.Text hiding (unwords, length, reverse)
 import Data.Data (Typeable, Data)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
-import Lox.Environment (Environment)
+import Lox.SeqEnv (Environment)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.List as L
@@ -103,6 +103,10 @@ data Statement' v a
     | ExprS (Expr' v a)
     | If SourceLocation (Expr' v a) (Statement' v a) (Maybe (Statement' v a))
     | Iterator SourceLocation v (Expr' v a) (Statement' v a)
+    | ForLoop SourceLocation (Maybe (Statement' v a))
+                             (Maybe (Expr' v a))
+                             (Maybe (Statement' v a))
+                             (Statement' v a)
     | Print SourceLocation (Expr' v a)
     | Return SourceLocation (Expr' v a)
     | Throw SourceLocation (Expr' v a)
@@ -130,6 +134,7 @@ instance Located (Statement' v a) where
     sourceLoc (If loc _ _ _) = loc
     sourceLoc (ClassDecl loc _ _ _ _) = loc
     sourceLoc (Iterator loc _ _ _) = loc
+    sourceLoc (ForLoop loc _ _ _ _) = loc
     sourceLoc (Throw loc _) = loc
     sourceLoc (Try loc _ _) = loc
 
@@ -152,12 +157,13 @@ data Expr' v a
     | Not SourceLocation (Expr' v a)
     | Binary BinaryOp (Expr' v a) (Expr' v a)
     | IfThenElse SourceLocation (Expr' v a) (Expr' v a) (Expr' v a) 
-    | Assign SourceLocation (LVal' v a) (Expr' v a)
+    | Assign SourceLocation (Maybe BinaryOp) (LVal' v a) (Expr' v a)
     | Call SourceLocation (Expr' v a) [Expr' v a]
     | Lambda SourceLocation (Maybe VarName) (Arguments' v) (Statement' v a)
     | GetField SourceLocation (Expr' v a) VarName
     | Index SourceLocation (Expr' v a) (Expr' v a)
     | Array SourceLocation [Expr' v a]
+    | ArrayRange SourceLocation (Expr' v a) (Expr' v a)
     | Mapping SourceLocation [(VarName, Expr' v a)]
     deriving (Show, Functor, Data, Typeable)
 
@@ -169,7 +175,7 @@ instance Located (Expr' v a) where
     sourceLoc (Not loc _) = loc
     sourceLoc (Binary _ lhs rhs) = sourceLoc lhs :..: sourceLoc rhs
     sourceLoc (IfThenElse loc _ _ _) = loc
-    sourceLoc (Assign loc _ _) = loc
+    sourceLoc (Assign loc _ _ _) = loc
     sourceLoc (Call loc _ _) = loc
     sourceLoc (Lambda loc _ _ _) = loc
     sourceLoc (GetField loc _ _) = loc

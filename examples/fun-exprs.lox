@@ -4,9 +4,9 @@ fun thrice(fn) {
   }
 }
 
-thrice(fun (a) {
+thrice((a) {
   print a * a;
 });
 // "1".
-// "2".
-// "3".
+// "4".
+// "9".
