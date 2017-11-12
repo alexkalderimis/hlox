@@ -13,13 +13,23 @@ print end - start
 
 print "array fold"
 start = clock()
-print xs.fold(0, (a, b) => a + b)
+r = xs.fold(0, (a, b) => a + b)
 end = clock()
+print r
 print end - start
 
-print "for loop - using ++"
+print "for loop - using <= & ++"
 start = clock(), r = 0
-for (let i = 0; i <= 1000000; i++) {
+for (let i = 0; i <= limit; i++) {
+    r += i
+}
+let end = clock()
+print r
+print end - start
+
+print "for loop - using < & ++"
+start = clock(), r = 0
+for (let i = 0; i < limit + 1; i++) {
     r += i
 }
 let end = clock()

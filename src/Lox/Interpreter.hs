@@ -65,6 +65,7 @@ interpreter env =
 -- we require two effects in the interpreter:
 -- * statefulness of the bindings
 -- * exception handing
+-- TODO: unroll this stack.
 type LoxT a = ExceptT LoxException (StateT Interpreter IO) a
 
 class Monad m => MonadLox m where
@@ -187,7 +188,7 @@ exec (Block _ sts) = do
     putEnv env
     return LoxNil
 
-exec (If _ condition a mb) = do
+exec (If _ condition a mb) = {-# SCC "exec-while" #-} do
     p <- truthy <$> eval condition
     if p
         then exec a
@@ -207,15 +208,23 @@ exec (Continue l) = throwError (LoxContinue l)
 exec (Return l e) = throwError =<< (LoxReturn l <$> eval e)
 
 exec (ForLoop loc minit mcond mpost body) = 
+    -- TODO: this is incorrect: we also need to verify that the limit cannot
+    -- change (ie. are any free variables in limit assigned in the body of the
+    -- loop?) - even that wouldn't work in the presence of threads...
     case (minit, mcond, mpost) of
       (Just (Define _ var e)
-        , (Just (Binary LessThanEq (Var _ var') limit))
+        , (Just (Binary op (Var _ var') limit))
           , (Just (ExprS (Assign _ (Just Add) (LVar var'') (Literal _ (LoxInt 1))))))
-        | var == var' && var == var'' && var `notAssignedIn` body -> do
+        | op `elem` [LessThan, LessThanEq]
+        , var == var'
+        , var == var''
+        , var `notAssignedIn` body -> do
             start <- eval e
             limit <- eval limit
             case (start, limit) of
-              (LoxInt i, LoxInt j) -> optimisedLoop i j var
+              (LoxInt i, LoxInt j) -> let j' = case op of LessThan -> j - 1
+                                                          LessThanEq -> j
+                                      in optimisedLoop i j' var
               _ -> asWhile
       _ -> asWhile
     where
@@ -236,7 +245,8 @@ exec (ForLoop loc minit mcond mpost body) =
         catchContinue e = throwError e
         catchBreak (LoxBreak l) = return LoxNil
         catchBreak e = throwError e
-        asWhile = do
+        asWhile = {-# SCC "exec-for-loop-with-while" #-}
+                  do
                   let while = While loc
                               (fromMaybe loop mcond)
                               (Block loc (body : maybeToList mpost))
