@@ -208,9 +208,6 @@ exec (Continue l) = throwError (LoxContinue l)
 exec (Return l e) = throwError =<< (LoxReturn l <$> eval e)
 
 exec (ForLoop loc minit mcond mpost body) = 
-    -- TODO: this is incorrect: we also need to verify that the limit cannot
-    -- change (ie. are any free variables in limit assigned in the body of the
-    -- loop?) - even that wouldn't work in the presence of threads...
     case (minit, mcond, mpost) of
       (Just (Define _ var e)
         , (Just (Binary op (Var _ var') limit))
@@ -220,31 +217,53 @@ exec (ForLoop loc minit mcond mpost body) =
         , var == var''
         , var `notAssignedIn` body -> do
             start <- eval e
-            limit <- eval limit
-            case (start, limit) of
-              (LoxInt i, LoxInt j) -> let j' = case op of LessThan -> j - 1
-                                                          LessThanEq -> j
-                                      in optimisedLoop i j' var
+            case start of
+              LoxInt i -> optimisedLoop i var (comp op) limit
               _ -> asWhile
       _ -> asWhile
     where
+        comp LessThan = (<)
+        comp LessThanEq = (<=)
         loop = Literal loc (LoxBool True)
-        -- the optimised loop prevents most loop bookkeeping, and the 
-        -- 2 var lookups and one function application per loop that would be needed
-        optimisedLoop i j var = do
+        -- the optimised loop prevents most loop bookkeeping - preventing
+        -- lookups of the loop var and function application of the post-cond.
+        optimisedLoop i var comp' limit = do
             old <- gets bindings
             env <- liftIO (declare var old)
             ref <- maybe (loxError loc "Could not find declared var") return
                    $ resolve var env
-            let it curr = do liftIO (writeRef ref (LoxInt curr))
-                             exec body `catchError` catchContinue
-            r <- (putEnv env >> (LoxNil <$ mapM_ it [i .. j]))
-                    `catchError` catchBreak
-            r <$ putEnv old
-        catchContinue (LoxContinue l) = return LoxNil
-        catchContinue e = throwError e
-        catchBreak (LoxBreak l) = return LoxNil
-        catchBreak e = throwError e
+            putEnv env *> whileLoop ref comp' limit i <* putEnv old
+
+        {-# INLINE runLoop #-}
+        runLoop ma ma' = do broken <- (False <$ ma) `catchError` catchLoop
+                            if broken then return LoxNil else ma'
+
+        {-# INLINE whileLoop #-}
+        whileLoop ref comp' limit curr = do
+            p <- compareLimit (comp' curr) limit
+            if not p
+              then return LoxNil
+              else runLoop (setRef ref curr >> exec body)
+                           (whileLoop ref comp' limit (curr + 1))
+
+        {-# INLINE compareLimit #-}
+        compareLimit f limit = do 
+            limit' <- eval limit
+            case limit' of
+              LoxNil -> return True
+              LoxInt j -> return (f j)
+              LoxDbl j -> return (f $ round j)
+              _ -> loxError (sourceLoc limit)
+                            $ "cannot compare " <> typeOf limit'
+
+        {-# INLINE setRef #-}
+        setRef ref i = liftIO (writeRef ref (LoxInt i))
+
+        -- did we break?
+        catchLoop (LoxContinue l) = return False
+        catchLoop (LoxBreak l) = return True
+        catchLoop e            = throwError e
+
         asWhile = {-# SCC "exec-for-loop-with-while" #-}
                   do
                   let while = While loc
