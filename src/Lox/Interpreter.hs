@@ -43,6 +43,7 @@ type BinaryFn = (LoxVal -> LoxVal -> LoxT LoxVal)
 
 data Interpreter = Interpreter
     { bindings :: !Env
+    , modules :: !(HM.HashMap ModuleIdentifier LoxModule)
     , warnings :: !(HS.HashSet Text)
     , initialising :: !Bool
     , stack :: ![StackFrame]
@@ -50,9 +51,13 @@ data Interpreter = Interpreter
     , array :: !Class -- the class of arrays
     }
 
+-- for now, a module is just an object
+-- this is bad, since objects are mutable, but that is for another day.
+type LoxModule = Object
+
 interpreter :: Env -> IO Interpreter
 interpreter env = 
-    Interpreter env mempty False [] <$> getClass "Object" <*> getClass "Array"
+    Interpreter env mempty mempty False [] <$> getClass "Object" <*> getClass "Array"
     where
         getClass c = do let mref = resolve c env
                         case mref of
@@ -111,6 +116,12 @@ runProgram = foldM runStatement LoxNil
     where runStatement _ s = exec s
 
 exec :: Statement -> LoxT LoxVal
+
+exec (Import loc mod var) = do
+    mod <- gets (HM.lookup mod . modules) >>= maybe (loadModule loc mod) return
+    exec (Declare loc var)
+    gets bindings >>= liftIO . assign var (LoxObj mod)
+    return LoxNil
 
 exec (Print _ e) = do v <- eval e
                       printLox v
@@ -744,3 +755,6 @@ locateError _  e                      = throwError e
 
 notAssignedIn :: VarName -> Statement -> Bool
 notAssignedIn var stm = not (var `isAssignedIn` stm)
+
+loadModule :: SourceLocation -> ModuleIdentifier -> LoxT Object
+loadModule loc m = loxError loc ("Could not find module: " <> show m)

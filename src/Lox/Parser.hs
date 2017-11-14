@@ -82,12 +82,23 @@ eof = expect EOF <|> (do n <- next
                          fatal ("Expected EOF, got " <> pack (show n)))
 
 declaration :: Parser Statement
-declaration =   (classDeclaration <* semis)
+declaration =   (importStatement <* semis)
+            <|> (classDeclaration <* semis)
             <|> (functionDefinition <* semis)
             <|> (varDefinition <* semis)
             <|> (varDeclaration <* semis)
             <|> statement
     where semis = skipWhile (== SEMICOLON)
+
+importStatement :: Parser Statement
+importStatement = do
+    keyword "import"
+    start <- loc
+    m <- ModuleIdentifier <$> manySepBy DOT identifier
+    keyword "as"
+    v <- identifier
+    end <- loc
+    return (Import (span start end) m v)
 
 classDeclaration :: Parser Statement
 classDeclaration = do

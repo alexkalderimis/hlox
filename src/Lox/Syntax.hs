@@ -16,7 +16,7 @@ module Lox.Syntax where
 import Control.Monad.IO.Class
 import Data.Fixed
 import Data.HashMap.Strict (HashMap)
-import Data.Hashable (Hashable)
+import Data.Hashable (Hashable, hash)
 import Data.Default
 import Data.IORef
 import Data.Monoid
@@ -75,6 +75,11 @@ class Located a where
 type Arguments = Arguments' VarName
 type Arguments' v = ([v], Maybe v)
 
+newtype ModuleIdentifier = ModuleIdentifier [Text]
+    deriving (Show, Eq, Data, Typeable, Generic)
+
+instance Hashable ModuleIdentifier
+
 data Method' v a
     = Constructor (Arguments' v) (Statement' v a)
     | StaticMethod VarName (Arguments' v) (Statement' v a)
@@ -101,8 +106,8 @@ data Statement' v a
     | Throw SourceLocation (Expr' v a)
     | Try SourceLocation (Statement' v a) [(v, (Statement' v a))]
     | While SourceLocation (Expr' v a) (Statement' v a)
+    | Import SourceLocation ModuleIdentifier v
     deriving (Show, Data, Typeable, Functor)
-
 
 instance Located (Statement' v a) where
     sourceLoc (While loc _ _) = loc
@@ -120,6 +125,7 @@ instance Located (Statement' v a) where
     sourceLoc (ForLoop loc _ _ _ _) = loc
     sourceLoc (Throw loc _) = loc
     sourceLoc (Try loc _ _) = loc
+    sourceLoc (Import loc _ _) = loc
 
 type LVal = LVal' VarName LoxVal
 data LVal' v a
