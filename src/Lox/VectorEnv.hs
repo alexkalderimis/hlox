@@ -8,9 +8,7 @@ import Data.Traversable
 import Data.IORef
 import Data.Monoid
 import Data.Foldable (foldMap)
-import Data.Sequence (Seq, (><), (|>))
 import Data.Hashable
-import qualified Data.Sequence as Seq
 import qualified Data.HashMap.Strict as HM
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashSet as HS

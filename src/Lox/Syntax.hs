@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -16,6 +17,7 @@ import Control.Monad.IO.Class
 import Data.Fixed
 import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable)
+import Data.Default
 import Data.IORef
 import Data.Monoid
 import Data.Text hiding (unwords, length, reverse)
@@ -24,16 +26,22 @@ import Data.Vector (Vector)
 import GHC.Generics (Generic)
 import Lox.SeqEnv (Environment)
 import System.IO.Unsafe (unsafePerformIO)
+import Data.Bifunctor.TH
 import qualified Data.HashMap.Strict as HM
 import qualified Data.List as L
 import qualified Data.Text as T
 
 import qualified Lox.Core.Array as A
 
+type VarName = Text
 type Value = Either LoxException LoxVal
 type LoxResult a = IO (Either LoxException a)
-type VarName = Text
 type Env = Environment VarName LoxVal
+
+type Statement = Statement' VarName LoxVal
+type Expr = Expr' VarName LoxVal
+type Method = Method' VarName LoxVal
+type Program = [Statement]
 
 type StackFrame = (VarName, SourceLocation)
 
@@ -42,13 +50,6 @@ class HasStackFrame a where
 
 instance HasStackFrame (Text, SourceLocation) where
     stackFrame = id
-
-instance HasStackFrame Callable where
-    stackFrame (BuiltIn sf _ _) = (sf, NativeCode)
-    stackFrame (Function sf _ _ _ _ _) = sf
-
-instance HasStackFrame Class where
-    stackFrame c = (className c, sourceLoc c)
 
 newtype Singleton = Singleton (IORef ())
     deriving Eq
@@ -68,29 +69,17 @@ range (start :..: end) = (fst (range start), snd (range end))
 range Unlocated = let r = ("No File", 0, 0) in (r, r)
 range NativeCode = let r = ("Native-Code", 0, 0) in (r, r)
 
-type Program = [Statement]
-type Parsed = [Statement' VarName Literal]
-
--- turn a parse tree into something we can interpret
-fromParsed :: Parsed -> Program
-fromParsed = fmap (fmap asValue)
-
 class Located a where
     sourceLoc :: a -> SourceLocation
 
-type LoxException = LoxException' LoxVal
-data LoxException' a = LoxError SourceLocation String
-                  | FieldNotFound SourceLocation VarName
-                  | LoxReturn SourceLocation a
-                  | LoxBreak SourceLocation
-                  | LoxContinue SourceLocation
-                  | UserError SourceLocation a
-                  | ArgumentError SourceLocation 
-                                  VarName [String] [a]
-                  | StackifiedError [StackFrame] (LoxException' a)
-                  deriving (Show, Data, Typeable)
+type Arguments = Arguments' VarName
+type Arguments' v = ([v], Maybe v)
 
-type Statement = Statement' VarName LoxVal
+data Method' v a
+    = Constructor (Arguments' v) (Statement' v a)
+    | StaticMethod VarName (Arguments' v) (Statement' v a)
+    | InstanceMethod VarName (Arguments' v) (Statement' v a)
+    deriving (Show, Functor, Data, Typeable)
 
 data Statement' v a
     = Block SourceLocation [Statement' v a]
@@ -114,12 +103,6 @@ data Statement' v a
     | While SourceLocation (Expr' v a) (Statement' v a)
     deriving (Show, Data, Typeable, Functor)
 
-type Method = Method' VarName LoxVal
-data Method' v a
-    = Constructor (Arguments' v) (Statement' v a)
-    | StaticMethod VarName (Arguments' v) (Statement' v a)
-    | InstanceMethod VarName (Arguments' v) (Statement' v a)
-    deriving (Show, Functor, Data, Typeable)
 
 instance Located (Statement' v a) where
     sourceLoc (While loc _ _) = loc
@@ -145,10 +128,6 @@ data LVal' v a
     | SetIdx (Expr' v a) (Expr' v a)
     deriving (Show, Functor, Data, Typeable)
 
-type Arguments = Arguments' VarName
-type Arguments' v = ([v], Maybe v)
-
-type Expr = Expr' VarName LoxVal
 data Expr' v a
     = Literal SourceLocation a
     | Grouping SourceLocation (Expr' v a)
@@ -194,6 +173,10 @@ data Callable = BuiltIn VarName (Int -> Bool) NativeFn
               | Function StackFrame [VarName] (Maybe VarName)
                          Statement CoreClasses Env
 
+instance HasStackFrame Callable where
+    stackFrame (BuiltIn sf _ _) = (sf, NativeCode)
+    stackFrame (Function sf _ _ _ _ _) = sf
+
 -- is this arity acceptable to this function?
 arity :: Callable -> Int -> Bool
 arity (Function _ _ (Just _) _ _ _) _ = True
@@ -220,6 +203,13 @@ data Literal
     | LitString !Text
     deriving (Show, Data, Typeable)
 
+type Parsed = [Statement' VarName Literal]
+
+-- turn a parse tree into something we can interpret
+fromParsed :: Parsed -> Program
+fromParsed = fmap (fmap asValue)
+
+
 -- lift literals to values
 asValue :: Literal -> LoxVal
 asValue lit = case lit of
@@ -244,6 +234,9 @@ data LoxVal
     | LoxIter Stepper
     deriving (Show)
 
+instance Default LoxVal where
+    def = LoxNil
+
 typeOf :: LoxVal -> String
 typeOf LoxNil = "nil"
 typeOf (LoxBool _) = "Boolean"
@@ -256,6 +249,18 @@ typeOf (LoxObj _) = "Object"
 typeOf (LoxArray _) = "Array"
 typeOf (LoxIter _) = "Iterator"
 
+type LoxException = LoxException' LoxVal
+data LoxException' a = LoxError SourceLocation String
+                  | FieldNotFound SourceLocation VarName
+                  | LoxReturn SourceLocation a
+                  | LoxBreak SourceLocation
+                  | LoxContinue SourceLocation
+                  | UserError SourceLocation a
+                  | ArgumentError SourceLocation 
+                                  VarName [String] [a]
+                  | StackifiedError [StackFrame] (LoxException' a)
+                  deriving (Show, Data, Typeable)
+
 data Stepper = forall a. Stepper a (a -> LoxResult (Maybe LoxVal, a))
 
 instance Show Stepper where
@@ -267,7 +272,7 @@ instance Show AtomArray where
     show _ = "AtomArray"
 
 arrayFromList :: (Monad m, MonadIO m) => [LoxVal] -> m AtomArray
-arrayFromList xs = AtomArray <$> liftIO (A.fromList LoxNil xs)
+arrayFromList xs = AtomArray <$> liftIO (A.fromList xs)
 
 nil :: LoxVal -> Bool
 nil LoxNil = True
@@ -295,6 +300,9 @@ data Class = Class
     , protocols :: HM.HashMap Protocol Callable
     , classLocation :: SourceLocation
     } deriving (Show)
+
+instance HasStackFrame Class where
+    stackFrame c = (className c, sourceLoc c)
 
 emptyClass :: Class
 emptyClass = Class (unsafePerformIO $ newSingleton)
@@ -354,3 +362,9 @@ simplify Unlocated = Unlocated
 simplify loc = let (l@(a, b, c), r@(d, e, f)) = range loc
                 in if l == r then SourceLocation a b c
                              else SourceLocation a b c :..: SourceLocation d e f
+
+$(deriveBifunctor ''LVal')
+$(deriveBifunctor ''Method')
+$(deriveBifunctor ''Statement')
+$(deriveBifunctor ''Expr')
+

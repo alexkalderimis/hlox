@@ -85,7 +85,7 @@ iterator [LoxArray arr] = do
 inclusiveRange :: NativeFn
 
 inclusiveRange [LoxInt from, LoxInt to] | from <= to = do
-    xs <- A.range from to >>= A.map LoxNil (return . LoxInt)
+    xs <- A.range from to >>= A.map (return . LoxInt)
     done xs
 inclusiveRange [LoxDbl from, LoxDbl to] =
     inclusiveRange [LoxInt (round from), LoxInt (round to)]
@@ -113,7 +113,7 @@ filterArray args = argumentError ["Array", "Function"] args
 mapArray :: NativeFn
 mapArray [LoxArray (AtomArray arr), LoxFn fn] = run $ do
     let f a = apply Unlocated fn [a]
-    fromArray <$> A.map LoxNil f arr
+    fromArray <$> A.map f arr
 mapArray args = argumentError ["Array", "Function"] args
 
 sortArray :: NativeFn

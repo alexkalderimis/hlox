@@ -32,18 +32,18 @@ objectKeys :: NativeFn
 
 objectKeys [LoxObj Object{..}] = do
     hm <- liftIO $ readIORef objectFields
-    vs <- AtomArray <$> A.fromList LoxNil (fmap LoxString $ HM.keys hm)
+    vs <- AtomArray <$> A.fromList (fmap LoxString $ HM.keys hm)
     return (Right $ LoxArray vs)
 
 objectEntries :: NativeFn
 
 objectEntries [LoxObj Object{..}] = do
     es <- HM.toList <$> (liftIO $ readIORef objectFields)
-    vs <- atomArray <$> (mapM pair es >>= A.fromList LoxNil)
+    vs <- atomArray <$> (mapM pair es >>= A.fromList)
     return (Right vs)
     where
         atomArray = LoxArray . AtomArray
-        pair (k, v) =  atomArray <$> A.fromList LoxNil [LoxString k, v]
+        pair (k, v) =  atomArray <$> A.fromList [LoxString k, v]
 
 iterator :: NativeFn
 

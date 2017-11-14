@@ -13,6 +13,7 @@ import Data.Data (Typeable, Data, gmapM)
 import Data.Generics.Aliases
 import Data.Generics.Schemes
 import Data.Maybe
+import Data.Bifunctor
 import Unsafe.Coerce (unsafeCoerce)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as T
@@ -32,7 +33,7 @@ type Args = Arguments' Name
 
 renameVars :: Parsed -> Replaced
 renameVars p = evalState (renameVarsM p') (0, HM.empty)
-    where p' = fmap (mapVSt (\t -> (t, 0))) p
+    where p' = fmap (first (\t -> (t, 0))) p
 
 renameVarsM :: [St] -> ReplaceM [St]
 renameVarsM = mapM handleStatement
@@ -142,62 +143,3 @@ handleLVar (Set e name) = do
     e' <- handleExpr e
     return (Set e name)
 handleLVar (SetIdx l r) = SetIdx <$> handleExpr l <*> handleExpr r
-
------ helpers to transform variable types.
--- this is horrible, horrible code
-
--- there must be a better way to do this....
-mapVSt :: forall a b c. (a -> b) -> Statement' a c -> Statement' b c
-mapVSt f stm = case stm of
-    Block loc stms -> Block loc (fmap (mapVSt f) stms)
-    ClassDecl loc nm v mv ms -> ClassDecl loc nm (f v) (fmap f mv)
-                                           (fmap (mapVM f) ms)
-    Declare loc v -> Declare loc (f v)
-    Define loc v e -> Define loc (f v) (mapVE f e)
-    DefineFn loc v arg stm -> DefineFn loc (f v) (mapVArg f arg) (mapVSt f stm)
-    ExprS e -> ExprS (mapVE f e)
-    If loc e a b -> If loc (mapVE f e) (mapVSt f a) (fmap (mapVSt f) b)
-    Iterator loc v e s -> Iterator loc (f v) (mapVE f e) (mapVSt f s)
-    ForLoop loc me0 me1 me2 stm -> ForLoop loc (fmap (mapVSt f) me0)
-                                               (fmap (mapVE f) me1)
-                                               (fmap (mapVSt f) me0)
-                                               (mapVSt f stm)
-    Print loc e -> Print loc (mapVE f e)
-    Return loc e -> Return loc (mapVE f e)
-    Throw loc e -> Throw loc (mapVE f e)
-    Try loc body handlers -> Try loc (mapVSt f body) [(f v, mapVSt f h) | (v, h) <- handlers]
-    While loc e s -> While loc (mapVE f e) (mapVSt f s)
-    _ -> unsafeCoerce stm -- no interesting subterms
-
-mapVM :: forall a b c. (a -> b) -> Method' a c -> Method' b c
-mapVM f m = case m of
-    Constructor args stm -> Constructor (mapVArg f args) (mapVSt f stm)
-    StaticMethod name args stm -> StaticMethod name (mapVArg f args) (mapVSt f stm)
-    InstanceMethod name args stm -> InstanceMethod name (mapVArg f args)
-                                                        (mapVSt f stm)
-
-mapVArg :: forall a b. (a -> b) -> Arguments' a -> Arguments' b
-mapVArg f (vs, mv) = (fmap f vs, fmap f mv)
-
-mapVE :: forall a b c. (a -> b) -> Expr' a c -> Expr' b c
-mapVE f e = case e of
-    Grouping loc e -> Grouping loc (mapVE f e)
-    Var loc v -> Var loc (f v)
-    Negate loc e -> Negate loc (mapVE f e)
-    Not loc e -> Not loc (mapVE f e)
-    Binary op a b -> Binary op (mapVE f a) (mapVE f b)
-    IfThenElse loc p a b -> IfThenElse loc (mapVE f p) (mapVE f a) (mapVE f b)
-    Assign loc mop lval e -> let lhs = case lval of
-                                    LVar v -> LVar (f v)
-                                    Set e fld -> Set (mapVE f e) fld
-                                    SetIdx e idx -> SetIdx (mapVE f e) (mapVE f idx)
-                              in Assign loc mop lhs (mapVE f e)
-    Call loc fn args -> Call loc (mapVE f fn) (fmap (mapVE f) args)
-    Lambda loc nm args stm -> Lambda loc nm (mapVArg f args) (mapVSt f stm)
-    GetField loc e fld -> GetField loc (mapVE f e) fld
-    Index loc e i -> Index loc (mapVE f e) (mapVE f i)
-    Array loc es -> Array loc (fmap (mapVE f) es)
-    ArrayRange loc a b -> ArrayRange loc (mapVE f a) (mapVE f b)
-    Mapping loc flds -> Mapping loc [(fld, mapVE f e) | (fld, e) <- flds]
-    _ -> unsafeCoerce e
-

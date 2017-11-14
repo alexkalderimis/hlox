@@ -235,16 +235,15 @@ exec (ForLoop loc minit mcond mpost body) =
             putEnv env *> whileLoop ref comp' limit i <* putEnv old
 
         {-# INLINE runLoop #-}
-        runLoop ma ma' = do broken <- (False <$ ma) `catchError` catchLoop
-                            if broken then return LoxNil else ma'
+        runLoop ma = (False <$ ma) `catchError` catchLoop
 
         {-# INLINE whileLoop #-}
         whileLoop ref comp' limit curr = do
             p <- compareLimit (comp' curr) limit
             if not p
               then return LoxNil
-              else runLoop (setRef ref curr >> exec body)
-                           (whileLoop ref comp' limit (curr + 1))
+              else do broke <- runLoop (setRef ref curr >> exec body)
+                      if broke then return LoxNil else (whileLoop ref comp' limit (curr + 1))
 
         {-# INLINE compareLimit #-}
         compareLimit f limit = do 
@@ -507,7 +506,7 @@ eval (Mapping loc pairs) = do
     return (LoxObj obj)
 
 atomArray :: [LoxVal] -> LoxT LoxVal
-atomArray as = LoxArray . AtomArray <$> liftIO (A.fromList LoxNil as)
+atomArray = fmap (LoxArray . AtomArray) . liftIO . A.fromList
 
 init :: SourceLocation -> Object -> [LoxVal] -> LoxT ()
 init loc obj args = construct obj args

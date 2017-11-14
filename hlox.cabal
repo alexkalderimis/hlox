@@ -42,6 +42,8 @@ library
                      , vector
                      , random
                      , containers >= 0.5.8
+                     , bifunctors
+                     , data-default
   default-language:    Haskell2010
 
 executable hlox-exe
