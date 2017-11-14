@@ -1,0 +1,5 @@
+let limit = 100
+for ( let i = 0 ; i < limit ; i++) {
+    print i
+    limit = limit / 2
+}
