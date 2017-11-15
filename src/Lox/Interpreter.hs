@@ -416,7 +416,7 @@ eval (Negate loc e) = do
       _        -> loxError loc $ "expected number, got " <> show v
 
 eval (Not loc e) = do
-    v <- truthy <$> eval e
+    v <- not . truthy <$> eval e
     return (LoxBool v)
 
 eval (Binary And x y) = do
@@ -683,6 +683,9 @@ stringify (LoxInt n) = return $ show n
 stringify (LoxDbl n) = return $ printf "%f" n
 stringify (LoxFn fn) = return "<function>"
 stringify (LoxClass cls) = return $ "<class " <> T.unpack (className cls) <> ">"
+stringify (LoxObj o) | Just fn <- HM.lookup "toString" (methods $ objectClass o) = do
+    fn <- bindThis (LoxObj o) fn
+    apply Unlocated fn [] >>= stringify
 stringify (LoxObj Object{..}) = do
     fs <- L.sortBy (compare `on` fst) . HM.toList <$> liftIO (readIORef objectFields)
     fs' <- mapM (sequence . second stringify) fs

@@ -1,1 +1,2 @@
-let val = "D"
+// This single random value should be visible twice.
+let val = Random.range("a", "z")

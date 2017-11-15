@@ -75,7 +75,7 @@ getMethod cls inst k = do
 setField :: NativeFn
 
 setField [LoxObj Object{..}, LoxString k, v] =
-    Right v <$ modifyIORef objectFields (HM.insert k v)
+    k `seq` v `seq` (Right v <$ modifyIORef' objectFields (HM.insert k v))
 
 setField args = argumentError ["Object", "String", "Any"] args
 

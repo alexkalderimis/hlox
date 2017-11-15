@@ -1,0 +1,75 @@
+let singleton
+let fromArray
+
+{
+    class List {
+        init(x, tail) {
+            this.head = x
+            this.tail = tail
+        }
+
+        add(val) {
+            this.tail = List(this.head, this.tail)
+            this.head = val
+        }
+
+        pop() {
+            let ret = this.head
+            if (this.tail) {
+                this.head = this.tail.head
+                this.tail = this.tail.tail
+            } else {
+                this.tail = this.head = nil
+            }
+            return ret
+        }
+
+        length() {
+            return 1 + (if this.tail then this.tail.length() else 0)
+        }
+
+        toString() {
+            if (this.hasCycle()) return "List(" + this.head + ", <loop>)"
+
+            let ret = "List("
+            let list = this
+            while (list) {
+                ret += list.head
+                if (list.tail) ret += ", "
+                list = list.tail
+            }
+            return ret + ")"
+        }
+
+        hasCycle() {
+            let a = this
+            let b = this.tail
+            while (true) {
+                if (a == nil or b == nil) {
+                    return false
+                }
+                if (a == b) {
+                    return true
+                }
+                a = a.tail
+                b = if b.tail then b.tail.tail else nil
+            }
+        }
+    }
+
+    singleton = (x) => List(x, nil)
+
+    fromArray = (xs) {
+        let ret = nil
+        let curr = ret
+        for (x in xs) {
+            let node = singleton(x)
+            if (ret) {
+                curr = curr.tail = node
+            } else {
+                curr = ret = node
+            }
+        }
+        return ret
+    }
+}
