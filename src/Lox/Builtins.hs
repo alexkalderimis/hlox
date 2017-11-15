@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Lox.Builtins (initInterpreter) where
@@ -16,6 +17,7 @@ import Lox.Interpreter (LoxT, Interpreter, apply, runLoxT, interpreter)
 import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O
 import qualified Lox.Builtins.Random as R
+import qualified Lox.Builtins.IO as LoxIO
 
 initInterpreter :: IO Interpreter
 initInterpreter = do
@@ -24,11 +26,15 @@ initInterpreter = do
     interpreter mods env
 
 builtinModules :: IO [(ModuleIdentifier, Object)]
-builtinModules = return [(ModuleIdentifier ["Math"], maths)]
+builtinModules = sequenceA $ fmap sequenceA
+    [(ModuleIdentifier ["math"], maths)
+    ,(ModuleIdentifier ["random"], R.random)
+    ,(ModuleIdentifier ["io"], LoxIO.object)
+    ]
 
 builtins :: IO Env
 builtins = enterScopeWith vals mempty
-    where vals = classes [A.array, O.baseClass, R.random, errorCls]
+    where vals = classes [A.array, O.baseClass, errorCls]
                  ++
                  [("clock", LoxFn (BuiltIn "clock" (== 0) clock))
                  ,("apply", LoxFn (BuiltIn "apply" (== 2) applyFun))
@@ -63,8 +69,8 @@ applyFun [LoxFn fn, LoxArray as] = run $ do
     apply Unlocated fn (V.toList vs)
 applyFun args = argumentError ["Function", "Array"] args
 
-maths :: Object
-maths = Object O.baseClass (unsafePerformIO $ newIORef (HM.fromList flds))
+maths :: IO Object
+maths = Object O.baseClass <$> newIORef (HM.fromList flds)
     where
        flds = 
            [("pi",  LoxDbl pi)

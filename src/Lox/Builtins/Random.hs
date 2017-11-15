@@ -2,25 +2,25 @@
 
 module Lox.Builtins.Random where
 
+import Data.Monoid
 import System.Random
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
+import System.IO.Unsafe (unsafePerformIO)
+import Data.IORef
 
 import Lox.Syntax hiding (arity)
 import qualified Lox.Builtins.Object as O
 
-random :: Class
-random = emptyClass
-    { className = "Random"
-    , classId = unsafeSingleton ()
-    , superClass = Just O.baseClass
-    , staticMethods = HM.fromList
-                      [("int", BuiltIn "Random.int" (== 0) randomInt)
-                      ,("float", BuiltIn "Random.float" (== 0) randomFloat)
-                      ,("char", BuiltIn "Random.char" (== 0) randomChar)
-                      ,("range", BuiltIn "Random.range" (== 2) randomRange)
-                      ]
-    }
+random :: IO Object
+random = Object emptyClass <$> newIORef (HM.fromList flds)
+    where
+        flds = [fn "int" (== 0) randomInt
+               ,fn "float" (== 0) randomFloat
+               ,fn "char" (== 0) randomChar
+               ,fn "range" (== 2) randomRange
+               ]
+        fn name arity f = (name, LoxFn $ BuiltIn ("Random." <> name) arity f)
 
 randomInt :: NativeFn
 randomInt _ = Right . LoxInt <$> randomIO
