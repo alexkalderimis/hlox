@@ -1,0 +1,4 @@
+import examples.B as B
+import examples.C as C
+
+print B.x + C.x

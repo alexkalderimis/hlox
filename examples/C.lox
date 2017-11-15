@@ -1,0 +1,3 @@
+import examples.D as D
+
+let x = "C(" + D.val + ")"
