@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module Lox.Builtins (builtins) where
+module Lox.Builtins (initInterpreter) where
 
 import Data.IORef
 import qualified Data.HashMap.Strict as HM
@@ -12,10 +12,19 @@ import qualified Data.Text as T
 
 import Lox.Syntax
 import Lox.SeqEnv (enterScopeWith)
-import Lox.Interpreter (LoxT, apply, runLoxT, interpreter)
+import Lox.Interpreter (LoxT, Interpreter, apply, runLoxT, interpreter)
 import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O
 import qualified Lox.Builtins.Random as R
+
+initInterpreter :: IO Interpreter
+initInterpreter = do
+    mods <- builtinModules
+    env <- builtins
+    interpreter mods env
+
+builtinModules :: IO [(ModuleIdentifier, Object)]
+builtinModules = return [(ModuleIdentifier ["Math"], maths)]
 
 builtins :: IO Env
 builtins = enterScopeWith vals mempty
@@ -24,7 +33,6 @@ builtins = enterScopeWith vals mempty
                  [("clock", LoxFn (BuiltIn "clock" (== 0) clock))
                  ,("apply", LoxFn (BuiltIn "apply" (== 2) applyFun))
                  ,("typeof", LoxFn (BuiltIn "typeof" (== 1) typeofFn))
-                 ,("Math", LoxObj maths)
                  ]
 
 classes :: [Class] -> [(VarName, LoxVal)]
@@ -69,5 +77,5 @@ maths = Object O.baseClass (unsafePerformIO $ newIORef (HM.fromList flds))
        mathsFn _ args = return (Left $ ArgumentError NativeCode "" ["Number"] args)
 
 run :: LoxT LoxVal -> LoxResult LoxVal
-run lox = interpreter mempty >>= runLoxT lox
+run lox = interpreter [] mempty >>= runLoxT lox
 

@@ -23,7 +23,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
 import Lox.Language
-import Lox.Builtins (builtins)
+import Lox.Builtins (initInterpreter)
 
 data Error = Error Int Text Text
     deriving (Show)
@@ -49,8 +49,7 @@ runFile fileName = do
     case fst parsed of
       Left e  -> do parseError e
                     exitFailure
-      Right p -> do env <- builtins
-                    s <- interpreter env
+      Right p -> do s <- initInterpreter
                     let prog = fromParsed p
                     res <- evalLoxT (runProgram prog) s
                     case res of
@@ -63,7 +62,7 @@ runPrompt :: IO ()
 runPrompt = do
     names <- newIORef ([] :: [Text])
     welcome
-    s <- builtins >>= interpreter
+    s <- initInterpreter
     let settings = setComplete (completeNames names)
                  $ defaultSettings
     runInputT settings (go 0 names replOpts s)

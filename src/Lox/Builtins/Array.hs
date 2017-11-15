@@ -140,7 +140,7 @@ inPlaceSort [LoxArray (AtomArray xs)] = do
     run (A.sort (<=>) xs >> return LoxNil)
 
 run :: LoxT LoxVal -> LoxResult LoxVal
-run lox = interpreter mempty >>= runLoxT lox
+run lox = interpreter [] mempty >>= runLoxT lox
 
 inPlace :: (Array LoxVal -> IO ()) -> NativeFn
 inPlace f [LoxArray (AtomArray arr)] = Right LoxNil <$ f arr

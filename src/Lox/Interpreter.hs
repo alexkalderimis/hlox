@@ -64,12 +64,13 @@ data Interpreter = Interpreter
 data LoxModule = Loading -- detect cycles - mutual imports are not supported.
                | Loaded Object
 
-interpreter :: Env -> IO Interpreter
-interpreter env = do
-    mods <- newIORef mempty
+interpreter :: [(ModuleIdentifier, Object)] -> Env -> IO Interpreter
+interpreter modules env = do
+    mod <- getMod
+    mods <- newIORef $ HM.fromList [(m, Loaded o { objectClass = mod }) | (m, o) <- modules]
     Interpreter env env mods mempty False [] <$> getClass "Object"
                                              <*> getClass "Array"
-                                             <*> getMod
+                                             <*> pure mod
     where
         getMod = do cls <- getClass "Object"
                     cid <- newSingleton
@@ -104,7 +105,7 @@ class Monad m => MonadLox m where
 
 instance MonadLox IO where
     printLox a = do
-        i <- interpreter mempty
+        i <- interpreter mempty mempty
         s <- runLoxT (stringify a) i
         either (error . show) putStrLn s
 
@@ -135,7 +136,7 @@ stackify s e = do
       fs -> return (StackifiedError fs e)
 
 run :: Env -> Program -> IO Value
-run env program = interpreter env >>= runLoxT (runProgram program)
+run env program = interpreter [] env >>= runLoxT (runProgram program)
 
 runProgram :: Program -> LoxT LoxVal
 runProgram = foldM runStatement LoxNil

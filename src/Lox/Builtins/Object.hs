@@ -80,4 +80,4 @@ setField [LoxObj Object{..}, LoxString k, v] =
 setField args = argumentError ["Object", "String", "Any"] args
 
 run :: LoxT LoxVal -> LoxResult LoxVal
-run lox = interpreter mempty >>= runLoxT lox
+run lox = interpreter [] mempty >>= runLoxT lox
