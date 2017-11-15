@@ -72,7 +72,9 @@ interpreter env = do
                                              <*> getMod
     where
         getMod = do cls <- getClass "Object"
+                    cid <- newSingleton
                     return $ cls { className = "Module"
+                                 , classId = cid
                                  , protocols = HM.delete Settable (protocols cls)
                                  }
         getClass c = do let mref = resolve c env
@@ -489,18 +491,22 @@ eval (Assign loc mop (SetIdx lhs idx) e) = {-# SCC "eval-assign-idx" #-} do
 eval (Assign loc mop (Set lhs fld) e) = do
     v <- eval e
     o <- eval lhs
-    case o of
-      LoxObj Object{objectFields=fs} -> assignField fs v
-      _  -> loxError loc ("Cannot assign to " <> typeOf o)
+    setter <- lookupProtocol Settable o
+              >>= maybe (cannotSet o) return
+    v' <- value o v
+    apply loc setter [o, LoxString fld, v']
     where
-        noop = loxError loc $ "Unknown operator"
-        setFld fs v = liftIO (modifyIORef' fs (HM.insert fld v)) >> return v
-        assignField fs v = case mop of
-            Nothing -> setFld fs v
-            Just op -> do old <- (HM.lookup fld <$> liftIO (readIORef fs))
-                                  >>= maybe (throwError (FieldNotFound loc fld)) return
-                          fn <- maybe noop return $ HM.lookup op binaryFns
-                          fn old v >>= setFld fs
+        cannotSet o = loxError loc ("Cannot assign to " <> typeOf o)
+        cannotGet o = loxError loc ("Cannot read fields of " <> typeOf o)
+        unknownOp = loxError loc $ "Unknown operator"
+        value o v | mop == Nothing = return v
+        value o v = do
+            fn <- maybe unknownOp return (mop >>= flip HM.lookup binaryFns)
+            getter <- lookupProtocol Gettable o
+                      >>= maybe (cannotGet o) return
+            old <- apply loc getter [o, LoxString fld]
+                    `catchError` locateError loc
+            fn old v
 
 eval (Call loc callee args) = {-# SCC "eval-fun-call" #-} do
     e <- eval callee

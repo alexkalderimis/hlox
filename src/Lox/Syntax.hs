@@ -251,7 +251,7 @@ typeOf (LoxDbl _) = "Number"
 typeOf (LoxString _) = "String"
 typeOf (LoxFn _) = "Function"
 typeOf (LoxClass _) = "Class"
-typeOf (LoxObj _) = "Object"
+typeOf (LoxObj c) = T.unpack (className $ objectClass c)
 typeOf (LoxArray _) = "Array"
 typeOf (LoxIter _) = "Iterator"
 
