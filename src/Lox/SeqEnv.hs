@@ -77,3 +77,10 @@ inCurrentScope _ _ = False
 
 boundNames :: (Hashable k, Eq k) => Environment k v -> HS.HashSet k
 boundNames = HS.fromList . HM.keys . envVars
+
+-- remove all names bound in the lhs
+diffEnv :: (Hashable k, Eq k)
+        => Environment k v -> Environment k v -> Environment k v
+diffEnv lhs (Environment m) = Environment (foldr HM.delete m bound)
+    where bound = boundNames lhs
+

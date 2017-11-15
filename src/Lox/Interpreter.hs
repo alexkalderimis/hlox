@@ -25,40 +25,56 @@ import Data.Text (Text)
 import Data.Function (on)
 import Data.Traversable
 import Text.Printf (printf)
+import System.FilePath (joinPath, (<.>))
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import qualified Data.List as L
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Data.Vector as V
 import           Data.Vector ((!?))
 
 import Lox.Syntax
 import Lox.Analyse (isAssignedIn)
+import Lox.Scanner (tokens)
+import Lox.Parser (runParser, tokenStream, program)
 import qualified Lox.Core.Array as A
 
 import Lox.SeqEnv (
-    declare, assign, resolve, newRef, writeRef, deref, enterScope, enterScopeWith, inCurrentScope)
+    declare, assign, resolve, newRef, writeRef, deref, readEnv, diffEnv,
+    enterScope, enterScopeWith, inCurrentScope)
 
 type BinaryFn = (LoxVal -> LoxVal -> LoxT LoxVal)
+type Modules = IORef (HM.HashMap ModuleIdentifier LoxModule)
 
 data Interpreter = Interpreter
-    { bindings :: !Env
-    , modules :: !(HM.HashMap ModuleIdentifier LoxModule)
+    { baseEnv :: !Env
+    , bindings :: !Env
+    , modules :: !Modules
     , warnings :: !(HS.HashSet Text)
     , initialising :: !Bool
     , stack :: ![StackFrame]
     , object :: !Class -- the base class all classes must inherit from
     , array :: !Class -- the class of arrays
+    , moduleCls :: !Class -- the class of modules
     }
 
 -- for now, a module is just an object
 -- this is bad, since objects are mutable, but that is for another day.
-type LoxModule = Object
+data LoxModule = Loading -- detect cycles - mutual imports are not supported.
+               | Loaded Object
 
 interpreter :: Env -> IO Interpreter
-interpreter env = 
-    Interpreter env mempty mempty False [] <$> getClass "Object" <*> getClass "Array"
+interpreter env = do
+    mods <- newIORef mempty
+    Interpreter env env mods mempty False [] <$> getClass "Object"
+                                             <*> getClass "Array"
+                                             <*> getMod
     where
+        getMod = do cls <- getClass "Object"
+                    return $ cls { className = "Module"
+                                 , protocols = HM.delete Settable (protocols cls)
+                                 }
         getClass c = do let mref = resolve c env
                         case mref of
                           Nothing -> return emptyClass
@@ -66,6 +82,14 @@ interpreter env =
                                          case ma of
                                            Just (LoxClass cls) -> return cls
                                            _                   -> return emptyClass
+
+-- get an interpreter for loading a module.
+moduleInterpreter :: Interpreter -> Interpreter
+moduleInterpreter parent = parent { warnings = mempty
+                                  , bindings = baseEnv parent
+                                  , initialising = False
+                                  , stack = []
+                                  }
 
 -- we require two effects in the interpreter:
 -- * statefulness of the bindings
@@ -118,7 +142,7 @@ runProgram = foldM runStatement LoxNil
 exec :: Statement -> LoxT LoxVal
 
 exec (Import loc mod var) = do
-    mod <- gets (HM.lookup mod . modules) >>= maybe (loadModule loc mod) return
+    mod <- getModule loc mod
     exec (Declare loc var)
     gets bindings >>= liftIO . assign var (LoxObj mod)
     return LoxNil
@@ -756,5 +780,40 @@ locateError _  e                      = throwError e
 notAssignedIn :: VarName -> Statement -> Bool
 notAssignedIn var stm = not (var `isAssignedIn` stm)
 
+getModule :: SourceLocation -> ModuleIdentifier -> LoxT Object
+getModule loc mod = do
+    mods <- gets modules
+    x <- HM.lookup mod <$> liftIO (readIORef mods)
+    case x of
+      Just Loading -> loxError loc ("Module cycle detected " <> show mod)
+      Just (Loaded o) -> return o
+      Nothing -> do
+          liftIO $ modifyIORef' mods (HM.insert mod Loading)
+          o <- loadModule loc mod `catchError` unblock mods
+          liftIO $ modifyIORef' mods (HM.insert mod (Loaded o))
+          return o
+    where
+        unblock ref e = do liftIO (modifyIORef' ref (HM.delete mod))
+                           throwError e
+
 loadModule :: SourceLocation -> ModuleIdentifier -> LoxT Object
-loadModule loc m = loxError loc ("Could not find module: " <> show m)
+loadModule loc m = do
+    s <- get
+    fn <- moduleToFileName m
+    code <- liftIO (T.readFile fn) `catchError` fileNotFound fn
+    let (ts, es) = tokens code
+    when (not $ null es) $ loxError loc $ mconcat
+        ["Could not load ", show m, ": "]
+        <> L.intercalate "\n" (map show es)
+    let (Right parsed, _) = runParser program (tokenStream fn ts)
+    put (moduleInterpreter s)
+    env <- runProgram (fromParsed parsed) >> gets bindings
+    put s
+    vals <- liftIO (readEnv (diffEnv (bindings s) env) >>= newIORef)
+    return (Object (moduleCls s) vals)
+    where
+        fileNotFound n _ = loxError loc ("Could not find module: " <> show n)
+
+moduleToFileName :: ModuleIdentifier -> LoxT FilePath
+moduleToFileName (ModuleIdentifier parts) = do
+    return (joinPath (map T.unpack parts) <.> "lox")

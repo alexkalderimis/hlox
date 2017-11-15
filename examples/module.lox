@@ -1,0 +1,5 @@
+let stringProp = "Hello"
+
+fun greet(you) {
+    print stringProp + " " + you + "!"
+}
