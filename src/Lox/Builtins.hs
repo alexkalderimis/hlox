@@ -4,6 +4,7 @@
 
 module Lox.Builtins (initInterpreter) where
 
+import Control.Concurrent (threadDelay)
 import Data.IORef
 import qualified Data.HashMap.Strict as HM
 import System.IO.Unsafe (unsafePerformIO)
@@ -39,6 +40,7 @@ builtins = enterScopeWith vals mempty
                  [("clock", LoxFn (BuiltIn "clock" (== 0) clock))
                  ,("apply", LoxFn (BuiltIn "apply" (== 2) applyFun))
                  ,("typeof", LoxFn (BuiltIn "typeof" (== 1) typeofFn))
+                 ,("sleep", LoxFn (BuiltIn "sleep" (== 1) sleep))
                  ]
 
 classes :: [Class] -> [(VarName, LoxVal)]
@@ -63,6 +65,10 @@ typeofFn [x] = return . Right . LoxString . T.pack $ typeOf x
 clock :: NativeFn
 clock _ = fmap (Right . LoxDbl . (/ 1e9) . fromInteger . toNanoSecs)
         $ getTime Realtime
+
+sleep :: NativeFn
+sleep [LoxInt i] = Right LoxNil <$ threadDelay (i * 1000000)
+sleep [LoxDbl i] = Right LoxNil <$ threadDelay (floor $ i * 1e6)
 
 applyFun [LoxFn fn, LoxArray as] = run $ do
     vs <- readArray as

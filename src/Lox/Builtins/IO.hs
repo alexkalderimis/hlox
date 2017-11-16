@@ -2,6 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Lox.Builtins.IO where
 
+import Data.Bifunctor
 import Control.Exception
 import Data.Monoid
 import qualified Data.Text.IO as T
@@ -31,8 +32,6 @@ readLn' [] = do
     return (fmap LoxString content)
 
 callIO :: IO a -> LoxResult a
-callIO io = do
-    r <- liftIO $ (Right <$> io) `catch` \ (ex :: IOException) -> return (Left ex)
-    case r of
-      Right r -> return (Right r)
-      Left e -> return (Left $ LoxError NativeCode (show e))
+callIO io = liftIO $ (Right <$> io) `catch` h
+    where h :: IOException -> LoxResult a
+          h = return . Left . LoxError NativeCode .show
