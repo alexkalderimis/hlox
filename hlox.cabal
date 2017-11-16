@@ -28,6 +28,7 @@ library
                       ,Lox.Builtins.Array
                       ,Lox.Builtins.Object
                       ,Lox.Builtins.Random
+                      ,Lox.Builtins.Thread
                       ,Lox.Builtins.IO
                       ,Lox.Transform
                       ,Lox.Analyse

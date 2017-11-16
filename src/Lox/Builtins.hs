@@ -22,6 +22,7 @@ import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O
 import qualified Lox.Builtins.Random as R
 import qualified Lox.Builtins.IO as LoxIO
+import qualified Lox.Builtins.Thread as Thread
 
 initInterpreter :: IO Interpreter
 initInterpreter = do
@@ -34,6 +35,7 @@ builtinModules = sequenceA $ fmap sequenceA
     [(ModuleIdentifier ["math"], maths)
     ,(ModuleIdentifier ["random"], R.random)
     ,(ModuleIdentifier ["io"], LoxIO.object)
+    ,(ModuleIdentifier ["thread"], Thread.object)
     ]
 
 builtins :: IO Env
