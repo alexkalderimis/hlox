@@ -36,6 +36,7 @@ library
                      , text
                      , mtl
                      , syb
+                     , stm
                      , hashable
                      , unordered-containers
                      , clock
@@ -46,6 +47,7 @@ library
                      , bifunctors
                      , data-default
                      , filepath
+                     , array
   default-language:    Haskell2010
 
 executable hlox-exe

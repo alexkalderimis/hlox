@@ -5,7 +5,6 @@ import Prelude hiding (lookup)
 
 import Control.Arrow (second)
 import Data.Traversable
-import Data.IORef
 import Data.Monoid
 import Data.Foldable (foldMap)
 import Data.Sequence (Seq, (><), (|>))
@@ -14,9 +13,11 @@ import qualified Data.Sequence as Seq
 import qualified Data.HashMap.Strict as HM
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashSet as HS
+import Control.Concurrent.STM
 
 -- Environments are persistent linked mappings of mutable values
-type Ref a = IORef (Maybe a)
+type Ref a = TVar (Maybe a)
+
 newtype Environment k a = Environment
     { envVars :: (HM.HashMap k (Ref a))
     }
@@ -27,20 +28,20 @@ instance (Hashable k, Eq k) => Monoid (Environment k v) where
         Environment (HM.union vs' vs)
 
 readEnv :: Environment k a -> IO (HashMap k a)
-readEnv = fmap (HM.mapMaybe id) . HM.traverseWithKey f . envVars
-    where f k r = deref r
+readEnv = atomically . fmap (HM.mapMaybe id) . HM.traverseWithKey f . envVars
+    where f k r = readTVar r
 
 writeRef :: Ref a -> a -> IO ()
-writeRef ref a = writeIORef ref (Just a)
+writeRef ref a = atomically $ writeTVar ref (Just a)
 
 emptyRef :: IO (Ref a)
-emptyRef = newIORef Nothing
+emptyRef = newTVarIO Nothing
 
 newRef :: a -> IO (Ref a)
-newRef = newIORef . Just
+newRef = newTVarIO . Just
 
 deref :: Ref a -> IO (Maybe a)
-deref = readIORef
+deref = readTVarIO
 
 -- Declare a variable in the current scope
 -- Previous bindings are shadowed by the insert

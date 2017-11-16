@@ -7,13 +7,13 @@ import System.Random
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
 import System.IO.Unsafe (unsafePerformIO)
-import Data.IORef
+import Control.Concurrent.STM
 
 import Lox.Syntax hiding (arity)
 import qualified Lox.Builtins.Object as O
 
 random :: IO Object
-random = Object emptyClass <$> newIORef (HM.fromList flds)
+random = Object emptyClass <$> newTVarIO (HM.fromList flds)
     where
         flds = [fn "int" (== 0) randomInt
                ,fn "float" (== 0) randomFloat

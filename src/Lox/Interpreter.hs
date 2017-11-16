@@ -9,7 +9,8 @@ module Lox.Interpreter where
 
 import Prelude hiding (init)
 
-import Data.Fixed
+import Control.Exception (catch)
+import Control.Concurrent.STM
 import Control.Applicative
 import Control.Arrow ((&&&), second)
 import Control.Monad.Except
@@ -385,13 +386,26 @@ eval (Assign loc mop (LVar v) e) = {-# SCC "eval-assign-var" #-} do
     ref <- maybe undeclared return (resolve v env)
     case mop of
       Nothing -> liftIO (writeRef ref x) >> return x
-      Just op -> do old <- fromMaybe LoxNil <$> liftIO (deref ref)
-                    fn <- maybe noop return $ HM.lookup op binaryFns
-                    x' <- fn old x
-                    liftIO (writeRef ref x')
-                    return x'
+      -- some things we can at least attempt to do in STM
+      Just Add -> do r <- liftIO $ (Just <$> transactional ref x)
+                                    `catch` (\(e :: LoxException) -> return Nothing)
+                     maybe (nonTransactional Add ref x) return r
+      -- other things we have to accept discontinuities
+      Just op -> nonTransactional op ref x
     where undeclared = loxError loc $ "Cannot set undeclared variable: " <> show v
           noop = loxError loc $ "Unknown operator"
+          nonTransactional op ref x = do
+            old <- fromMaybe LoxNil <$> liftIO (deref ref)
+            fn <- maybe noop return $ HM.lookup op binaryFns
+            x' <- fn old x
+            liftIO (writeRef ref x')
+            return x'
+          {-# INLINE transactional #-}
+          transactional ref x = liftIO . atomically $ do
+            old <- fromMaybe LoxNil <$> readTVar ref
+            new <- addSTM old x
+            writeTVar ref (Just new)
+            return new
 
 eval (Assign loc mop (SetIdx lhs idx) e) = {-# SCC "eval-assign-idx" #-} do
     target <- eval lhs
@@ -469,7 +483,7 @@ eval (Mapping loc pairs) = do
     cls <- gets object
     obj <- liftIO $ new cls
     vals <- mapM (sequence . second eval) pairs
-    liftIO $ writeIORef (objectFields obj) (HM.fromList vals)
+    liftIO $ atomically $ writeTVar (objectFields obj) (HM.fromList vals)
     return (LoxObj obj)
 
 atomArray :: [LoxVal] -> LoxT LoxVal
@@ -513,7 +527,7 @@ instantiate loc cls args = do
     return (LoxObj $ obj)
 
 new :: Class -> IO Object
-new cls = Object cls <$> newIORef HM.empty
+new cls = Object cls <$> newTVarIO HM.empty
 
 bindThis :: LoxVal -> Callable -> LoxT Callable
 bindThis this (BuiltIn n ar fn)
@@ -576,10 +590,6 @@ truthy (LoxBool b) = b
 truthy _           = True
 
 addAtoms :: BinaryFn
-addAtoms (LoxInt a) (LoxInt b) = return $ LoxInt (a + b)
-addAtoms (LoxDbl a) (LoxDbl b) = return $ LoxDbl (a + b)
-addAtoms (LoxInt a) (LoxDbl b) = return $ LoxDbl (fromIntegral a + b)
-addAtoms (LoxDbl a) (LoxInt b) = return $ LoxDbl (a + fromIntegral b)
 addAtoms (LoxArray (AtomArray a)) (LoxArray (AtomArray b)) = do
     ret <- liftIO $ A.concat a b
     return (LoxArray (AtomArray ret))
@@ -588,7 +598,21 @@ addAtoms a (LoxString b) = do s <- T.pack <$> stringify a
                               return $ LoxString (s <> b)
 addAtoms (LoxString a) b = do s <- T.pack <$> stringify b
                               return $ LoxString (a <> s)
-addAtoms a b = throw' ("Cannot add: " <> show a <> " and " <> show b)
+addAtoms a b = fromSTM (addSTM a b)
+
+fromSTM :: STM a -> LoxT a
+fromSTM stm = do
+    r <- liftIO $ (Right <$> atomically stm) `catch` (return . Left)
+    either throwError return r
+
+{-# INLINE addSTM #-}
+addSTM :: LoxVal -> LoxVal -> STM LoxVal
+addSTM (LoxInt a) (LoxInt b) = return $ LoxInt (a + b)
+addSTM (LoxDbl a) (LoxDbl b) = return $ LoxDbl (a + b)
+addSTM (LoxInt a) (LoxDbl b) = return $ LoxDbl (fromIntegral a + b)
+addSTM (LoxDbl a) (LoxInt b) = return $ LoxDbl (a + fromIntegral b)
+addSTM a b = let msg = "Cannot add: " <> show a <> " and " <> show b
+              in throwSTM (LoxError Unlocated msg :: LoxException)
 
 type DblFn = (Double -> Double -> Double)
 type IntFn = (Int -> Int -> Int)
@@ -613,7 +637,8 @@ stringify (LoxObj o) | Just fn <- HM.lookup "toString" (methods $ objectClass o)
     fn <- bindThis (LoxObj o) fn
     apply Unlocated fn [] >>= stringify
 stringify (LoxObj Object{..}) = do
-    fs <- L.sortBy (compare `on` fst) . HM.toList <$> liftIO (readIORef objectFields)
+    fieldMap <- liftIO $ atomically (readTVar objectFields)
+    let fs = L.sortBy (compare `on` fst) . HM.toList $ fieldMap
     fs' <- mapM (sequence . second stringify) fs
     return $ concat
            $ ["{"]
@@ -649,13 +674,14 @@ binaryFns = HM.fromList
     ,(Mod,           numericalFn "mod" ((fromIntegral .) . mod `on` floor) mod)
     ,(Seq,           (\a b -> a `seq` return b))
     ]
-    where lb f a b = LoxBool . f <$> a <=> b
-          divide (LoxDbl n) (LoxDbl d) = return (LoxDbl (n/d))
-          divide (LoxInt n) (LoxInt d) = let f = (/) `on` fromIntegral
-                                          in return (LoxDbl (f n d))
-          divide (LoxInt n) (LoxDbl d) = return (LoxDbl $ fromIntegral n / d)
-          divide (LoxDbl n) (LoxInt d) = return (LoxDbl $ n / fromIntegral d)
-          divide a          b          = throw' $ concat ["Cannot divide "
+    where
+        lb f a b = LoxBool . f <$> a <=> b
+        divide (LoxDbl n) (LoxDbl d) = return (LoxDbl (n/d))
+        divide (LoxInt n) (LoxInt d) = let f = (/) `on` fromIntegral
+                                        in return (LoxDbl (f n d))
+        divide (LoxInt n) (LoxDbl d) = return (LoxDbl $ fromIntegral n / d)
+        divide (LoxDbl n) (LoxInt d) = return (LoxDbl $ n / fromIntegral d)
+        divide a          b          = throw' $ concat ["Cannot divide "
                                                          , typeOf a
                                                          , " by "
                                                          , typeOf b
@@ -676,12 +702,14 @@ _             <=> LoxNil = return GT
 (LoxDbl a)    <=> (LoxInt b)    = return (a `compare` fromIntegral b)
 (LoxInt a)    <=> (LoxDbl b)    = return (fromIntegral a `compare` b)
 (LoxString a) <=> (LoxString b) = return (a `compare` b)
-(LoxArray a)  <=> (LoxArray b)  = do
-    as <- readArray a
-    bs <- readArray b
+(LoxArray (AtomArray a))  <=> (LoxArray (AtomArray b))  = do
+    as <- liftIO $ A.readArray a
+    bs <- liftIO $ A.readArray b
     ords <- V.zipWithM (<=>) as bs
-    return $ fromMaybe (V.length as `compare` V.length bs) $ V.find (/= EQ) ords
-a <=> b = throw' $ "Cannot compare " <> typeOf a <> " and " <> typeOf b
+    return $ fromMaybe (V.length as `compare` V.length bs)
+           $ V.find (/= EQ) ords
+a <=> b = let msg = "Cannot compare " <> typeOf a <> " and " <> typeOf b
+           in throwError (LoxError Unlocated msg :: LoxException)
 
 throw' :: String -> LoxT a
 throw' = throwError . LoxError Unlocated
@@ -744,7 +772,7 @@ loadModule loc m = do
     put (moduleInterpreter s)
     env <- runProgram (fromParsed parsed) >> gets bindings
     put s
-    vals <- liftIO (readEnv (diffEnv (bindings s) env) >>= newIORef)
+    vals <- liftIO (readEnv (diffEnv (bindings s) env) >>= newTVarIO)
     return (Object (moduleCls s) vals)
     where
         fileNotFound n _ = loxError loc ("Could not find module: " <> show n)

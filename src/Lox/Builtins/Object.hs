@@ -3,6 +3,7 @@
 
 module Lox.Builtins.Object (baseClass) where
 
+import Control.Concurrent.STM
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef
 import qualified Data.HashMap.Strict as HM
@@ -31,15 +32,15 @@ baseClass = emptyClass
 
 objectKeys :: NativeFn
 
-objectKeys [LoxObj Object{..}] = do
-    hm <- liftIO $ readIORef objectFields
+objectKeys [LoxObj o] = liftIO $ do
+    hm <- atomically . readTVar $ objectFields o
     vs <- AtomArray <$> A.fromList (fmap LoxString $ HM.keys hm)
     return (Right $ LoxArray vs)
 
 objectEntries :: NativeFn
 
-objectEntries [LoxObj Object{..}] = do
-    es <- HM.toList <$> (liftIO $ readIORef objectFields)
+objectEntries [LoxObj o] = do
+    es <- HM.toList <$> fields o
     vs <- atomArray <$> (mapM pair es >>= A.fromList)
     return (Right vs)
     where
@@ -48,8 +49,8 @@ objectEntries [LoxObj Object{..}] = do
 
 iterator :: NativeFn
 
-iterator [LoxObj Object{..}] = do
-    keys <- fmap LoxString . HM.keys <$> readIORef objectFields
+iterator [LoxObj o] = do
+    keys <- fmap LoxString . HM.keys <$> fields o
     let next []     = return $ Right (Nothing, [])
         next (k:ks) = return $ Right (Just k, ks)
         it = Stepper keys next
@@ -58,7 +59,7 @@ iterator [LoxObj Object{..}] = do
 getField :: NativeFn
 
 getField [LoxObj inst@Object{..}, LoxString k] = do
-    hm <- readIORef objectFields
+    hm <- fields inst
     case HM.lookup k hm of
       Nothing -> getMethod objectClass inst k
       Just v -> return (Right v)
@@ -76,9 +77,12 @@ getMethod cls inst k = do
 setField :: NativeFn
 
 setField [LoxObj Object{..}, LoxString k, v] =
-    k `seq` v `seq` (Right v <$ modifyIORef' objectFields (HM.insert k v))
+    Right v <$ (atomically $ modifyTVar' objectFields (HM.insert k v))
 
 setField args = argumentError ["Object", "String", "Any"] args
 
 run :: LoxT LoxVal -> LoxResult LoxVal
 run lox = interpreter [] mempty >>= runLoxT lox
+
+fields :: Object -> IO (HM.HashMap VarName LoxVal)
+fields = atomically . readTVar . objectFields

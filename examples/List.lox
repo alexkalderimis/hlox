@@ -25,6 +25,7 @@ let fromArray
         }
 
         length() {
+            if (this.hasCycle()) return 1 / 0
             return 1 + (if this.tail then this.tail.length() else 0)
         }
 

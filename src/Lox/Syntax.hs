@@ -14,6 +14,7 @@
 module Lox.Syntax where
 
 import Control.Monad.IO.Class
+import Control.Exception.Base (Exception)
 import Data.Fixed
 import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable, hash)
@@ -27,6 +28,7 @@ import GHC.Generics (Generic)
 import Lox.Environment (Environment)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Bifunctor.TH
+import Control.Concurrent.STM
 import qualified Data.HashMap.Strict as HM
 import qualified Data.List as L
 import qualified Data.Text as T
@@ -267,6 +269,8 @@ data LoxException' a = LoxError SourceLocation String
                   | StackifiedError [StackFrame] (LoxException' a)
                   deriving (Show, Data, Typeable)
 
+instance Exception LoxException
+
 data Stepper = forall a. Stepper a (a -> LoxResult (Maybe LoxVal, a))
 
 instance Show Stepper where
@@ -278,7 +282,7 @@ instance Show AtomArray where
     show _ = "AtomArray"
 
 arrayFromList :: (Monad m, MonadIO m) => [LoxVal] -> m AtomArray
-arrayFromList xs = AtomArray <$> liftIO (A.fromList xs)
+arrayFromList xs = AtomArray <$> (liftIO $  A.fromList xs)
 
 nil :: LoxVal -> Bool
 nil LoxNil = True
@@ -320,7 +324,7 @@ instance Located Class where
 
 data Object = Object
     { objectClass :: Class
-    , objectFields :: IORef (HM.HashMap VarName LoxVal)
+    , objectFields :: TVar (HM.HashMap VarName LoxVal)
     }
 
 instance Eq Object where

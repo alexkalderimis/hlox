@@ -9,12 +9,13 @@ import qualified Data.Text.IO as T
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
 import Data.IORef
+import Control.Concurrent.STM
 import Control.Monad.IO.Class (MonadIO, liftIO)
 
 import Lox.Syntax hiding (arity)
 
 object :: IO Object
-object = Object emptyClass <$> newIORef (HM.fromList flds)
+object = Object emptyClass <$> newTVarIO (HM.fromList flds)
     where
         flds = [fn "readFile" (== 1) readFile'
                ,fn "gets" (== 0) readLn'

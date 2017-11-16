@@ -4,6 +4,8 @@
 
 module Lox.Builtins (initInterpreter) where
 
+import Control.Exception (catch)
+import Control.Concurrent.STM
 import Control.Concurrent (threadDelay)
 import Data.IORef
 import qualified Data.HashMap.Strict as HM
@@ -56,9 +58,9 @@ errorCls = emptyClass
     }
 
 setErrorMsg :: NativeFn
-setErrorMsg [LoxObj Object{..}, msg] = do
-    modifyIORef objectFields $ HM.insert "message" msg
-    return (Right LoxNil)
+setErrorMsg [LoxObj Object{..}, msg] = fromSTM $ do
+    modifyTVar' objectFields $ HM.insert "message" msg
+    return LoxNil
 
 typeofFn :: NativeFn
 typeofFn [x] = return . Right . LoxString . T.pack $ typeOf x
@@ -77,7 +79,7 @@ applyFun [LoxFn fn, LoxArray as] = run $ do
 applyFun args = argumentError ["Function", "Array"] args
 
 maths :: IO Object
-maths = Object O.baseClass <$> newIORef (HM.fromList flds)
+maths = Object O.baseClass <$> newTVarIO (HM.fromList flds)
     where
        flds = 
            [("pi",  LoxDbl pi)
@@ -92,3 +94,5 @@ maths = Object O.baseClass <$> newIORef (HM.fromList flds)
 run :: LoxT LoxVal -> LoxResult LoxVal
 run lox = interpreter [] mempty >>= runLoxT lox
 
+fromSTM :: STM a -> LoxResult a
+fromSTM stm = (Right <$> atomically stm) `catch` (return . Left)
