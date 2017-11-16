@@ -24,7 +24,7 @@ import Data.Text hiding (unwords, length, reverse)
 import Data.Data (Typeable, Data)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
-import Lox.SeqEnv (Environment)
+import Lox.Environment (Environment)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Bifunctor.TH
 import qualified Data.HashMap.Strict as HM

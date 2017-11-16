@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE RecordWildCards #-}
 module Lox.Environment where
 
 import Prelude hiding (lookup)
@@ -8,24 +8,27 @@ import Data.Traversable
 import Data.IORef
 import Data.Monoid
 import Data.Foldable (foldMap)
-import Data.Hashable (Hashable)
-import Data.HashMap.Strict (HashMap)
-import Data.HashSet (HashSet)
+import Data.Sequence (Seq, (><), (|>))
+import Data.Hashable
+import qualified Data.Sequence as Seq
 import qualified Data.HashMap.Strict as HM
+import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashSet as HS
 
 -- Environments are persistent linked mappings of mutable values
 type Ref a = IORef (Maybe a)
-type Scope k a = HashMap k (Ref a)
-newtype Environment k a = Environment { scopes :: [Scope k a] }
+newtype Environment k a = Environment
+    { envVars :: (HM.HashMap k (Ref a))
+    }
 
-readEnv :: (Eq k, Hashable k) => Environment k a -> IO (HashMap k a)
-readEnv = fmap HM.unions . mapM unScope . scopes
-    where unScope = fmap (HM.mapMaybe id) . sequence . fmap deref
+instance (Hashable k, Eq k) => Monoid (Environment k v) where
+    mempty = Environment mempty
+    (Environment vs) `mappend` (Environment vs') =
+        Environment (HM.union vs' vs)
 
-instance Monoid (Environment k v) where
-    mempty = Environment []
-    mappend a b = Environment (scopes a <> scopes b)
+readEnv :: Environment k a -> IO (HashMap k a)
+readEnv = fmap (HM.mapMaybe id) . HM.traverseWithKey f . envVars
+    where f k r = deref r
 
 writeRef :: Ref a -> a -> IO ()
 writeRef ref a = writeIORef ref (Just a)
@@ -33,14 +36,18 @@ writeRef ref a = writeIORef ref (Just a)
 emptyRef :: IO (Ref a)
 emptyRef = newIORef Nothing
 
+newRef :: a -> IO (Ref a)
+newRef = newIORef . Just
+
 deref :: Ref a -> IO (Maybe a)
 deref = readIORef
 
 -- Declare a variable in the current scope
--- Previous bindings are dropped by the insert
+-- Previous bindings are shadowed by the insert
 declare :: (Hashable k, Eq k) => k -> Environment k v -> IO (Environment k v)
-declare k (Environment [])     = Environment . return        . HM.singleton k <$> emptyRef
-declare k (Environment (m:ms)) = Environment . (:ms) . ($ m) . HM.insert k <$> emptyRef
+declare k Environment{..} = do
+    ref <- emptyRef
+    return $ Environment { envVars = HM.insert k ref envVars }
 
 -- define sets the value of an existing binding, returning
 -- True iff the bounding was found.
@@ -50,25 +57,30 @@ assign k v env = case resolve k env of
     Just ref -> True <$ writeRef ref v
 
 resolve :: (Hashable k, Eq k) => k -> Environment k v -> Maybe (Ref v)
-resolve k = resolve' . scopes
-    where
-        resolve' [] = Nothing
-        resolve' (m:ms) = maybe (resolve' ms) return $ HM.lookup k m
+resolve k = HM.lookup k . envVars
 
--- start a new empty scope
+-- start a new empty scope (not required in this implementation)
 enterScope :: Environment k v -> Environment k v
-enterScope (scopes -> ms) = Environment (HM.empty : ms)
+enterScope = id
 
--- more efficient than mapM (declare >> assign) as this assigns
--- everthing to the same scope
 enterScopeWith :: (Eq k, Hashable k) => [(k, v)] -> Environment k v -> IO (Environment k v)
-enterScopeWith vals (scopes -> ms) = do
-    vals' <- mapM (sequence . second (newIORef . Just)) vals
-    return (Environment (HM.fromList vals' : ms))
+enterScopeWith vals Environment{..} = do
+    refs <- mapM newRef $ map snd vals
+    let vars = foldr insertPair envVars (zip (map fst vals) refs)
+    return $ Environment vars
+    where 
+        insertPair (k,v) m = HM.insert k v m
 
+--- no way of knowing; better to detect this via an analysis pass
 inCurrentScope :: (Hashable k, Eq k) => k -> Environment k v -> Bool
-inCurrentScope _ (Environment []) = False
-inCurrentScope k (Environment (m:_)) = HM.member k m
+inCurrentScope _ _ = False
 
-boundNames :: (Hashable k, Eq k) => Environment k v -> HashSet k
-boundNames = foldMap (HS.fromList . HM.keys) . scopes
+boundNames :: (Hashable k, Eq k) => Environment k v -> HS.HashSet k
+boundNames = HS.fromList . HM.keys . envVars
+
+-- remove all names bound in the lhs
+diffEnv :: (Hashable k, Eq k)
+        => Environment k v -> Environment k v -> Environment k v
+diffEnv lhs (Environment m) = Environment (foldr HM.delete m bound)
+    where bound = boundNames lhs
+

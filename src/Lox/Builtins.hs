@@ -13,7 +13,7 @@ import qualified Data.Vector as V
 import qualified Data.Text as T
 
 import Lox.Syntax
-import Lox.SeqEnv (enterScopeWith)
+import Lox.Environment (enterScopeWith)
 import Lox.Interpreter (LoxT, Interpreter, apply, runLoxT, interpreter)
 import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O

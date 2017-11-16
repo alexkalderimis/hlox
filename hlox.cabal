@@ -30,7 +30,6 @@ library
                       ,Lox.Builtins.IO
                       ,Lox.Transform
                       ,Lox.Analyse
-                      ,Lox.SeqEnv
                       ,Lox.VectorEnv
   build-depends:       base >= 4.7 && < 5
                      , text

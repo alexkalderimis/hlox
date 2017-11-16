@@ -40,7 +40,7 @@ import Lox.Scanner (tokens)
 import Lox.Parser (runParser, tokenStream, program)
 import qualified Lox.Core.Array as A
 
-import Lox.SeqEnv (
+import Lox.Environment (
     declare, assign, resolve, newRef, writeRef, deref, readEnv, diffEnv,
     enterScope, enterScopeWith, inCurrentScope)
 
