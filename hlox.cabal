@@ -21,6 +21,7 @@ library
                       ,Lox.Parser
                       ,Lox.Syntax
                       ,Lox.Interpreter
+                      ,Lox.Interpreter.Types
                       ,Lox.Environment
                       ,Lox.Core.Array
                       ,Lox.Builtins

@@ -2,6 +2,7 @@ module Lox.Language (
     module Lox.Scanner,
     module Lox.Parser,
     module Lox.Interpreter,
+    module Lox.Interpreter.Types,
     module Lox.Syntax,
     module Lox.Environment,
     simpleParse -- for use in ghci
@@ -17,8 +18,9 @@ import Lox.Parser (
     tokenStream, expression, program, ParseError(..), Parser(runParser))
 import Lox.Environment (Environment(..), declare, assign, enterScope, readEnv, boundNames)
 import Lox.Interpreter (
-    LoxT, Interpreter(..), interpreter,
-    printLox, eval, run, runProgram, runLoxT, evalLoxT)
+    eval, run, runProgram, printLox)
+import Lox.Interpreter.Types (
+    LoxT, Interpreter(..), interpreter, runLoxT, evalLoxT)
 
 simpleParse :: Code -> IO (Tokens, Parsed)
 simpleParse code = do

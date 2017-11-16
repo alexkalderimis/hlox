@@ -8,7 +8,8 @@ import Data.IORef
 import qualified Data.HashMap.Strict as HM
 
 import Lox.Syntax
-import Lox.Interpreter (LoxT, bindThis, runLoxT, interpreter)
+import Lox.Interpreter (bindThis)
+import Lox.Interpreter.Types (LoxT, runLoxT, interpreter)
 import qualified Lox.Core.Array as A
 
 -- the Gettable protocol is handled by the interpreter directly, in order

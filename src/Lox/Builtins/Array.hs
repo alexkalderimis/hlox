@@ -13,7 +13,8 @@ import Lox.Syntax
 import           Lox.Core.Array (Array)
 import qualified Lox.Core.Array as A
 import qualified Lox.Builtins.Object as O
-import Lox.Interpreter (LoxT, truthy, apply, bindThis, runLoxT, interpreter, (<=>))
+import Lox.Interpreter (truthy, apply, bindThis, (<=>))
+import Lox.Interpreter.Types (LoxT, runLoxT, interpreter)
 
 array :: Class
 array = emptyClass { className = "Array"

@@ -14,7 +14,8 @@ import qualified Data.Text as T
 
 import Lox.Syntax
 import Lox.Environment (enterScopeWith)
-import Lox.Interpreter (LoxT, Interpreter, apply, runLoxT, interpreter)
+import Lox.Interpreter (apply)
+import Lox.Interpreter.Types (LoxT, Interpreter, runLoxT, interpreter)
 import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O
 import qualified Lox.Builtins.Random as R

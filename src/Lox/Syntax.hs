@@ -228,16 +228,16 @@ asValue lit = case lit of
 data LoxVal
     -- Atomic values
     = LoxNil
-    | LoxBool Bool
-    | LoxInt Int
-    | LoxDbl Double
-    | LoxString Text
+    | LoxBool !Bool
+    | LoxInt {-# UNPACK #-} !Int
+    | LoxDbl {-# UNPACK #-} !Double
+    | LoxString !Text
     -- Composite stuff
-    | LoxFn Callable
-    | LoxClass Class
-    | LoxObj Object 
-    | LoxArray AtomArray
-    | LoxIter Stepper
+    | LoxFn !Callable
+    | LoxClass !Class
+    | LoxObj !Object 
+    | LoxArray !AtomArray
+    | LoxIter !Stepper
     deriving (Show)
 
 instance Default LoxVal where

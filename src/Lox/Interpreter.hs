@@ -43,62 +43,9 @@ import qualified Lox.Core.Array as A
 import Lox.Environment (
     declare, assign, resolve, newRef, writeRef, deref, readEnv, diffEnv,
     enterScope, enterScopeWith, inCurrentScope)
+import Lox.Interpreter.Types
 
 type BinaryFn = (LoxVal -> LoxVal -> LoxT LoxVal)
-type Modules = IORef (HM.HashMap ModuleIdentifier LoxModule)
-
-data Interpreter = Interpreter
-    { baseEnv :: !Env
-    , bindings :: !Env
-    , modules :: !Modules
-    , warnings :: !(HS.HashSet Text)
-    , initialising :: !Bool
-    , stack :: ![StackFrame]
-    , object :: !Class -- the base class all classes must inherit from
-    , array :: !Class -- the class of arrays
-    , moduleCls :: !Class -- the class of modules
-    }
-
--- for now, a module is just an object
--- this is bad, since objects are mutable, but that is for another day.
-data LoxModule = Loading -- detect cycles - mutual imports are not supported.
-               | Loaded Object
-
-interpreter :: [(ModuleIdentifier, Object)] -> Env -> IO Interpreter
-interpreter modules env = do
-    mod <- getMod
-    mods <- newIORef $ HM.fromList [(m, Loaded o { objectClass = mod }) | (m, o) <- modules]
-    Interpreter env env mods mempty False [] <$> getClass "Object"
-                                             <*> getClass "Array"
-                                             <*> pure mod
-    where
-        getMod = do cls <- getClass "Object"
-                    cid <- newSingleton
-                    return $ cls { className = "Module"
-                                 , classId = cid
-                                 , protocols = HM.delete Settable (protocols cls)
-                                 }
-        getClass c = do let mref = resolve c env
-                        case mref of
-                          Nothing -> return emptyClass
-                          Just ref -> do ma <- deref ref
-                                         case ma of
-                                           Just (LoxClass cls) -> return cls
-                                           _                   -> return emptyClass
-
--- get an interpreter for loading a module.
-moduleInterpreter :: Interpreter -> Interpreter
-moduleInterpreter parent = parent { warnings = mempty
-                                  , bindings = baseEnv parent
-                                  , initialising = False
-                                  , stack = []
-                                  }
-
--- we require two effects in the interpreter:
--- * statefulness of the bindings
--- * exception handing
--- TODO: unroll this stack.
-type LoxT a = ExceptT LoxException (StateT Interpreter IO) a
 
 class Monad m => MonadLox m where
     printLox :: LoxVal -> m ()
@@ -106,34 +53,12 @@ class Monad m => MonadLox m where
 instance MonadLox IO where
     printLox a = do
         i <- interpreter mempty mempty
-        s <- runLoxT (stringify a) i
-        either (error . show) putStrLn s
+        runLoxT (stringify a) i >>= either (error . show) putStrLn
 
-instance (MonadLox m) => MonadLox (StateT s m) where
-    printLox a = lift (printLox a)
-
-instance MonadLox m => MonadLox (ExceptT e m) where
-    printLox a = lift (printLox a)
-
-runLoxT :: LoxT a -> Interpreter -> LoxResult a
-runLoxT lox s = do
-    (ret, s') <- (`runStateT` s) $ runExceptT lox
-    case ret of
-      Left e -> Left <$> stackify s' e
-      Right e -> return (Right e)
-
-evalLoxT :: LoxT a -> Interpreter -> LoxResult (a, Interpreter)
-evalLoxT lox s = do
-    (ret, s') <- (`runStateT` s) $ runExceptT lox
-    case ret of
-      Left e -> stackify s' e >> return (Left e)
-      Right v -> return (Right (v, s'))
-
-stackify :: Interpreter -> LoxException -> IO LoxException
-stackify s e = do
-    case stack s of
-      [] -> return e
-      fs -> return (StackifiedError fs e)
+instance MonadLox LoxT where
+    printLox a = do
+        s <- stringify a
+        liftIO (putStrLn s)
 
 run :: Env -> Program -> IO Value
 run env program = interpreter [] env >>= runLoxT (runProgram program)
