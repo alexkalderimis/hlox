@@ -240,8 +240,6 @@ exec (Iterator loc loopVar e body) = do
 
     obj <- eval e
     Stepper a next <- iterable (sourceLoc e) obj
-    env <- liftIO (declare loopVar env)
-    putEnv env
 
     loop env next a
 
@@ -249,6 +247,8 @@ exec (Iterator loc loopVar e body) = do
     return LoxNil
     where
         loop env next a = do
+            env <- liftIO (declare loopVar env)
+            putEnv env
             (ma, a') <- fromLoxResult (sourceLoc e) (next a)
             case ma of
               Nothing -> return LoxNil
@@ -400,7 +400,6 @@ eval (Assign loc mop (LVar v) e) = {-# SCC "eval-assign-var" #-} do
             x' <- fn old x
             liftIO (writeRef ref x')
             return x'
-          {-# INLINE transactional #-}
           transactional ref x = liftIO . atomically $ do
             old <- fromMaybe LoxNil <$> readTVar ref
             new <- addSTM old x
