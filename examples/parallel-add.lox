@@ -1,0 +1,20 @@
+import thread as Thread
+
+let size = 100
+let xs = [1 .. size]
+let r = 0
+let start = clock()
+Thread.run(() {
+    for (i in xs) {
+        Thread.run(() {
+            for (j in xs) {
+                Thread.run(() => r += j + (i - 1) * size)
+            }
+        })
+    }
+})
+while (r < (size * size + 1) * size * size / 2) {
+    print (clock() - start) + ": " + r
+    sleep(0.005)
+}
+print r
