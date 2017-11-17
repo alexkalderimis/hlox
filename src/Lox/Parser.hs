@@ -394,7 +394,11 @@ addition :: Parser Expr
 addition = binary [(PLUS, Add), (MINUS, Subtract)] multiplication
 
 multiplication :: Parser Expr
-multiplication = binary [(PERCENT, Mod), (STAR, Multiply), (SLASH, Divide)] unary
+multiplication = binary [(PERCENT, Mod), (STAR, Multiply), (SLASH, Divide)]
+                        exponents
+
+exponents :: Parser Expr
+exponents = binary [(STARSTAR, Exponent)] unary
 
 unary :: Parser Expr
 unary = p <|> fnExpr <|> call <|> atom

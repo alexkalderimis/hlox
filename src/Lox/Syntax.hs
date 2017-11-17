@@ -353,6 +353,7 @@ data BinaryOp = Equals
               | Or
               | Seq
               | Mod
+              | Exponent
               deriving (Generic, Show, Eq, Data, Typeable)
 
 instance Hashable BinaryOp -- requires Generic

@@ -48,7 +48,7 @@ data Token =
     LEFT_PAREN | RIGHT_PAREN
     | LEFT_BRACE | RIGHT_BRACE
     | LEFT_SQUARE | RIGHT_SQUARE
-    | COMMA | DOT | SEMICOLON | SLASH | STAR
+    | COMMA | DOT | SEMICOLON | SLASH
     | PERCENT | COLON
 
     -- One or two character tokens.
@@ -59,6 +59,7 @@ data Token =
     | EQUAL_GT
     | PLUS | PLUSPLUS | PLUSEQ
     | MINUS | MINUSMINUS | MINUSEQ
+    | STAR | STARSTAR
 
     -- Literals.
     | IDENTIFIER Text
@@ -102,7 +103,6 @@ go (Just (c, rst)) =
             '.' -> token DOT
             ':' -> token COLON
             ';' -> token SEMICOLON
-            '*' -> token STAR
             '%' -> token PERCENT
             -- whitespace
             ' ' -> skip
@@ -111,6 +111,7 @@ go (Just (c, rst)) =
             '\n' -> do modify' (\s -> s { line = succ (line s), char = 0 })
                        skip
             -- have to peek ahead
+            '*' -> checkNext rst STAR [('*', STARSTAR)]
             '+' -> checkNext rst PLUS  [('+', PLUSPLUS), ('=', PLUSEQ)]
             '-' -> checkNext rst MINUS  [('+', MINUSMINUS), ('=', MINUSEQ)]
             '!' -> checkNext rst BANG  [('=', BANG_EQUAL)]

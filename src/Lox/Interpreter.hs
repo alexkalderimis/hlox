@@ -620,9 +620,9 @@ numericalFn _ _ f (LoxInt a) (LoxInt b) = return $ LoxInt (f a b)
 numericalFn _ f _ (LoxDbl a) (LoxDbl b) = return $ LoxDbl (f a b)
 numericalFn _ f _ (LoxInt a) (LoxDbl b) = return $ LoxDbl (f (fromIntegral a) b)
 numericalFn _ f _ (LoxDbl a) (LoxInt b) = return $ LoxDbl (f a (fromIntegral b))
-numericalFn name _ _ a b = throw' $ concat [ "Cannot ", name, ": "
-                                         , show a, " and ", show b
-                                         ]
+numericalFn name _ _ a b = throw' $ concat [ "Cannot apply operator: "
+                                           , typeOf a, " ", name, " ", typeOf b
+                                           ]
 
 stringify :: LoxVal -> LoxT String
 stringify LoxNil = return "nil"
@@ -667,11 +667,12 @@ binaryFns = HM.fromList
     ,(GreaterThan,   lb (== GT))
     ,(GreaterThanEq, lb (/= LT))
     ,(Add,           addAtoms)
-    ,(Subtract,      numericalFn "subtract" (-) (-))
-    ,(Multiply,      numericalFn "multiply" (*) (*))
+    ,(Subtract,      numericalFn "-" (-) (-))
+    ,(Multiply,      numericalFn "*" (*) (*))
     ,(Divide,        divide)
-    ,(Mod,           numericalFn "mod" ((fromIntegral .) . mod `on` floor) mod)
+    ,(Mod,           numericalFn "%" ((fromIntegral .) . mod `on` floor) mod)
     ,(Seq,           (\a b -> a `seq` return b))
+    ,(Exponent,      numericalFn "**" (**) (^))
     ]
     where
         lb f a b = LoxBool . f <$> a <=> b
