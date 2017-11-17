@@ -209,23 +209,9 @@ data Literal
     | LitInt !Int
     | LitDbl !Double
     | LitString !Text
-    deriving (Show, Data, Typeable)
+    deriving (Show, Eq, Data, Typeable)
 
 type Parsed = [Statement' VarName Literal]
-
--- turn a parse tree into something we can interpret
-fromParsed :: Parsed -> Program
-fromParsed = fmap (fmap asValue)
-
-
--- lift literals to values
-asValue :: Literal -> LoxVal
-asValue lit = case lit of
-                LitNil      -> LoxNil
-                LitBool b   -> LoxBool b
-                LitInt i    -> LoxInt i
-                LitDbl n    -> LoxDbl n
-                LitString t -> LoxString t
 
 data LoxVal
     -- Atomic values

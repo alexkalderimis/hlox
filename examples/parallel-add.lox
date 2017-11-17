@@ -13,7 +13,7 @@ Thread.run(() {
         })
     }
 })
-while (r < (size * size + 1) * size * size / 2) {
+while (r < (size ** 2 + 1) * size ** 2 / 2) {
     print (clock() - start) + ": " + r
     sleep(0.005)
 }

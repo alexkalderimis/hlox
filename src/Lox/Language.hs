@@ -5,15 +5,17 @@ module Lox.Language (
     module Lox.Interpreter.Types,
     module Lox.Syntax,
     module Lox.Environment,
+    module Lox.Optimise,
     simpleParse -- for use in ghci
                     ) where
 
 import Lox.Scanner (Code, Token(..), Tokens, tokens, tokensFrom)
+import Lox.Optimise (fromParsed)
 import Lox.Syntax (
     Env, LoxException, LoxException'(..),
     Expr, Expr'(..), Statement, Statement'(..),
     Program, Parsed, Value, LoxResult,
-    LoxVal(..), SourceLocation(..), fromParsed, typeOf, range, nil)
+    LoxVal(..), SourceLocation(..), typeOf, range, nil)
 import Lox.Parser (
     tokenStream, expression, program, ParseError(..), Parser(runParser))
 import Lox.Environment (Environment(..), declare, assign, enterScope, readEnv, boundNames)

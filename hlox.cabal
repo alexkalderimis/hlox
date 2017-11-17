@@ -33,6 +33,7 @@ library
                       ,Lox.Transform
                       ,Lox.Analyse
                       ,Lox.VectorEnv
+                      ,Lox.Optimise
   build-depends:       base >= 4.7 && < 5
                      , text
                      , mtl

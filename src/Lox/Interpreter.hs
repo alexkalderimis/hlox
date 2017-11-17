@@ -39,6 +39,7 @@ import Lox.Syntax
 import Lox.Analyse (isAssignedIn)
 import Lox.Scanner (tokens)
 import Lox.Parser (runParser, tokenStream, program)
+import Lox.Optimise (fromParsed)
 import qualified Lox.Core.Array as A
 
 import Lox.Environment (
@@ -400,6 +401,7 @@ eval (Assign loc mop (LVar v) e) = {-# SCC "eval-assign-var" #-} do
             x' <- fn old x
             liftIO (writeRef ref x')
             return x'
+          -- TODO: extend to other operations than just Add
           transactional ref x = liftIO . atomically $ do
             old <- fromMaybe LoxNil <$> readTVar ref
             new <- addSTM old x

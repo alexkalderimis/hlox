@@ -132,6 +132,9 @@ run' i ReplOpts{..} intS code = do
                     return intS
       Right p -> do let prog = fromParsed p
                         lox = runProgram prog
+                    when showAST $ do
+                        putStrLn "==== PROG"
+                        print prog
                     when showResult $ putStrLn "=== OUTPUT"
                     res <- evalLoxT lox
                                     (intS { bindings = enterScope (bindings intS) })
