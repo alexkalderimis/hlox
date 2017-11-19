@@ -36,3 +36,12 @@ let end = clock()
 print r
 print end - start
 
+print "iterator"
+start = clock(), r = 0
+for (x in xs) {
+    r += x
+}
+let end = clock()
+print r
+print end - start
+
