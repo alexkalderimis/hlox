@@ -377,9 +377,8 @@ pattern = do
     where
         kvPat = do
             IDENTIFIER v <- next
-            expect COLON
-            p <- pattern
-            return (v, p)
+            mp <- optional (expect COLON >> pattern)
+            return (v, fromMaybe (Name v) mp)
 
 patternList :: Parser ([Pattern VarName], Maybe (Pattern VarName))
 patternList = do
