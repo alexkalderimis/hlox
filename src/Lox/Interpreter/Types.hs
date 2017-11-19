@@ -4,6 +4,9 @@
 
 module Lox.Interpreter.Types where
 
+import Data.Bifunctor (first)
+import Control.Exception (SomeException, ErrorCall(..), fromException, displayException, try)
+import Data.Maybe
 import Data.IORef
 import Control.Monad.IO.Class
 import Control.Monad.State.Class
@@ -59,8 +62,8 @@ instance MonadError (LoxException' LoxVal) LoxT where
 
 instance MonadIO LoxT where
     liftIO io = LoxT $ \s -> do
-        a <- io
-        return (Right a, s)
+        res <- try io
+        return (first fromIOError res, s)
 
 runLoxT :: LoxT a -> Interpreter -> LoxResult a
 runLoxT (LoxT f) s = do
@@ -131,3 +134,9 @@ stackify s e = do
       [] -> return e
       fs -> return (StackifiedError fs e)
 
+fromIOError :: SomeException -> LoxException
+fromIOError e = LoxError Unlocated msg
+    where
+        msg = fromMaybe (displayException e)
+              $ (fmap (\(ErrorCall err) -> err) $ fromException e)
+    

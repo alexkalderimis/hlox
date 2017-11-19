@@ -40,7 +40,7 @@ simplifyExpr = everywhere $ mkT k
                     Binary Add (Array here es) (Array there bs)                                        -> Array (here :..: there) (es <> bs)
                     IfThenElse _ (Literal _ (LitBool True)) e _                                        -> e
                     IfThenElse _ (Literal _ (LitBool False)) _ e                                       -> e
-                    Assign loc Nothing (LVar v) (Binary op (Var _ v') e) | v == v'                     -> Assign loc (Just op) (LVar v) e
+                    Assign loc Nothing (LVar (Name v)) (Binary op (Var _ v') e) | v == v'              -> Assign loc (Just op) (LVar (Name v)) e
                     e -> e
 
         fn Add      = Just (+)

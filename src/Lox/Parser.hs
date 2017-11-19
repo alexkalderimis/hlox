@@ -162,11 +162,11 @@ varDefinition :: Parser Statement
 varDefinition = do
     expect (KEYWORD "let")
     start <- loc
-    IDENTIFIER var <- next
+    p <- pattern
     expect EQUAL
     e <- expression
     end <- loc
-    return (Define (span start end) var e)
+    return (Define (span start end) p e)
 
 varDeclaration :: Parser Statement
 varDeclaration = do
@@ -347,11 +347,11 @@ assignment = do
             case lhs of
               (GetField loc e name) -> return (Set e name)
               (Index loc e idx) -> return (SetIdx e idx)
-              (Var loc name) -> return (LVar name)
+              (Var loc name) -> return (LVar (Name name))
               _ -> empty
         assign' = do
             here <- loc
-            lhs <- lval
+            lhs <- (LVar <$> pattern) <|> lval
             op <- (Nothing <$ expect EQUAL)
                   <|> (Just Add <$ expect PLUSEQ)
                   <|> (Just Subtract <$ expect MINUSEQ)
@@ -363,6 +363,31 @@ assignment = do
             op <- (Add <$ expect PLUSPLUS) <|> (Subtract <$ expect MINUSMINUS)
             let rhs = Literal here $ LitInt 1
             return (Assign here (Just op) lhs rhs)
+
+pattern :: Parser (Pattern VarName)
+pattern = do
+    t <- next
+    case t of
+        KEYWORD "_" -> return Ignore
+        IDENTIFIER v -> return (Name v)
+        LEFT_BRACE -> FromObject <$> (manySepBy COMMA kvPat <* expect RIGHT_BRACE)
+        LEFT_SQUARE -> do (ps, rest) <- patternList <* expect RIGHT_SQUARE
+                          return (FromArray ps rest)
+        _ -> empty
+    where
+        kvPat = do
+            IDENTIFIER v <- next
+            expect COLON
+            p <- pattern
+            return (v, p)
+
+patternList :: Parser ([Pattern VarName], Maybe (Pattern VarName))
+patternList = do
+    ps <- manySepBy COMMA pattern
+    rest <- optional $ do if null ps then pure () else expect COMMA
+                          expect DOT >> expect DOT
+                          pattern
+    return (ps, rest)
 
 ifThenElse :: Parser Expr
 ifThenElse = do

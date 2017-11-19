@@ -22,14 +22,14 @@ import Lox.Syntax
 
 type ReplaceM = State (Int, HM.HashMap VarName Int)
 
-type Replaced = [Statement' Name Literal]
+type Replaced = [Statement' Variable Literal]
 
-type Name = (VarName, Int)
-type St = Statement' Name Literal
-type Exp = Expr' Name Literal
-type Meth = Method' Name Literal
-type LV = LVal' Name Literal
-type Args = Arguments' Name
+type Variable = (VarName, Int)
+type St = Statement' Variable Literal
+type Exp = Expr' Variable Literal
+type Meth = Method' Variable Literal
+type LV = LVal' Variable Literal
+type Args = Arguments' Variable
 
 renameVars :: Parsed -> Replaced
 renameVars p = evalState (renameVarsM p') (0, HM.empty)
@@ -38,7 +38,7 @@ renameVars p = evalState (renameVarsM p') (0, HM.empty)
 renameVarsM :: [St] -> ReplaceM [St]
 renameVarsM = mapM handleStatement
 
-replaceName :: Name -> ReplaceM Name
+replaceName :: Variable -> ReplaceM Variable
 replaceName (name,_) = do
     (n, m) <- get
     put (n + 1, HM.insert name n m)
@@ -57,7 +57,7 @@ scoped ra = do
     put s -- discard changes caused by ra
     return a
 
-getSubstitute :: Name -> ReplaceM Name
+getSubstitute :: Variable -> ReplaceM Variable
 getSubstitute (name,_) = do
     msub <- gets (HM.lookup name . snd)
     return . (name,) $ fromMaybe notFound msub
@@ -73,10 +73,10 @@ handleStatement (DefineFn loc name args stm) = do
 
 handleStatement (Declare loc name) = Declare loc <$> replaceName name
 
-handleStatement (Define loc name e) = do
+handleStatement (Define loc p e) = do
     e' <- handleExpr e
-    name' <- replaceName name
-    return (Define loc name' e')
+    p' <- handlePattern p
+    return (Define loc p' e')
 
 handleStatement (ClassDecl loc name var super ms) = do
     var' <- replaceName var
@@ -138,8 +138,14 @@ handleExpr e = gmapM f e
           f = mkM handleStatement `extM` handleExpr `extM` handleLVar
 
 handleLVar :: LV -> ReplaceM LV
-handleLVar (LVar name) = LVar <$> getSubstitute name
+handleLVar (LVar p) = LVar <$> handlePattern p
 handleLVar (Set e name) = do
     e' <- handleExpr e
     return (Set e name)
 handleLVar (SetIdx l r) = SetIdx <$> handleExpr l <*> handleExpr r
+
+handlePattern :: Pattern Variable -> ReplaceM (Pattern Variable)
+handlePattern Ignore = return Ignore
+handlePattern (Name n) = Name <$> getSubstitute n
+handlePattern (FromArray ps mp) = FromArray <$> mapM handlePattern ps <*> mapM handlePattern mp
+handlePattern (FromObject ps) = FromObject <$> mapM (\(k,p) -> (k,) <$> handlePattern p) ps

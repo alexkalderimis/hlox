@@ -81,7 +81,7 @@ reservedWords = HS.fromList
     ,"print", "return", "throw", "try", "catch"
     ,"while", "for", "in", "break", "continue"
     ,"nil"
-    , "import", "as"
+    , "import", "as", "_"
     ]
 
 scan :: Text -> Scanner
@@ -123,6 +123,7 @@ go (Just (c, rst)) =
                     Just ('/', rst') -> consumeComment rst'
                     mr               -> addToken SLASH >> advance >> go mr
             '"' -> advance >> string rst
+            '_' -> token (KEYWORD "_")
             _ | isDigit c -> number c rst
             _ | isAlpha c -> varOrKeyword c rst
             _ -> unexpectedCharacter c rst

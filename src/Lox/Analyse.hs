@@ -50,9 +50,10 @@ assignedVars' (ClassDecl _ _ classname _ ms) = do
             maybe (return ()) (modify' . HS.insert) mv
             assignedVars stm <* put closed
 assignedVars' (Declare _ v) = mempty <$ modify' (HS.insert v)
-assignedVars' (Define _ v e) = do
+assignedVars' (Define _ p e) = do
+    let vs = patternVars p
+    modify' $ \s -> foldr HS.insert s vs
     assigned <- assignments e
-    modify' (HS.insert v)
     return assigned
 assignedVars' (DefineFn _ v (vs, mv) body) = do
     modify' (HS.insert v)
@@ -100,9 +101,11 @@ assignments e = do
     return (HS.difference s closed)
 
 assignments' :: (Expr' VarName a) -> AssignedM (HS.HashSet VarName)
-assignments' (Assign _ _ (LVar v) e) = do
+assignments' (Assign _ _ (LVar p) e) = do
     others <- assignments e
-    return (HS.singleton v <> others)
+    let vs = patternVars p
+    modify' $ \s -> foldr HS.insert s vs
+    return (HS.fromList vs <> others)
 assignments' (Grouping _ e) = assignments' e
 assignments' (Negate _ e) = assignments' e
 assignments' (Not _ e) = assignments' e
@@ -121,4 +124,3 @@ assignments' (Array _ es) = HS.unions <$> mapM assignments es
 assignments' (ArrayRange _ a b) = HS.union <$> assignments a <*> assignments b
 assignments' (Mapping _ pairs) = HS.unions <$> mapM assignments (map snd pairs)
 assignments' _ = return mempty
-

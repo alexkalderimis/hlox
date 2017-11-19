@@ -89,15 +89,12 @@ exec (Try loc stm handlers) = exec stm `catchError` handleWith handlers
 
 exec (DefineFn loc v args body) = {-# SCC "exec-define-fun" #-} do
     exec (Declare loc v) -- functions can recurse, so declare before define
-    eval (Assign loc Nothing (LVar v) (Lambda loc (Just v) args body))
+    eval (Assign loc Nothing (LVar (Name v)) (Lambda loc (Just v) args body))
 
-exec (Define loc v e) = {-# SCC "exec-define" #-} do
-    isBound <- gets (inCurrentScope v . bindings)
-    when isBound $ 
-        warn loc ("Binding for " <> v <> " already exists in the current scope")
+exec (Define loc p e) = {-# SCC "exec-define" #-} do
     x <- eval e
-    exec (Declare loc v)
-    gets bindings >>= liftIO . assign v x
+    mapM_ (exec . Declare loc) (patternVars p)
+    bindPattern loc p x
     return x
 
 exec (Declare _ v) = do
@@ -174,9 +171,9 @@ exec (Return l e) = throwError =<< (LoxReturn l <$> eval e)
 
 exec (ForLoop loc minit mcond mpost body) = 
     case (minit, mcond, mpost) of
-      (Just (Define _ var e)
+      (Just (Define _ (Name var) e)
         , (Just (Binary op (Var _ var') limit))
-          , (Just (ExprS (Assign _ (Just Add) (LVar var'') (Literal _ (LoxInt 1))))))
+          , (Just (ExprS (Assign _ (Just Add) (LVar (Name var'')) (Literal _ (LoxInt 1))))))
         | op `elem` [LessThan, LessThanEq]
         , var == var'
         , var == var''
@@ -381,7 +378,7 @@ eval (Var loc v) = {-# SCC "eval-var" #-} do
     where undef = loxError loc $ "Undefined variable: " <> show v
           uninit = loxError loc $ "Uninitialised variable: " <> show v
 
-eval (Assign loc mop (LVar v) e) = {-# SCC "eval-assign-var" #-} do
+eval (Assign loc mop (LVar (Name v)) e) = {-# SCC "eval-assign-var" #-} do
     x <- eval e
     env <- gets bindings
     ref <- maybe undeclared return (resolve v env)
@@ -407,6 +404,14 @@ eval (Assign loc mop (LVar v) e) = {-# SCC "eval-assign-var" #-} do
             new <- addSTM old x
             writeTVar ref (Just new)
             return new
+
+eval (Assign loc Nothing (LVar p) e) = do
+    x <- eval e
+    bindPattern loc p x
+    return x
+
+eval (Assign loc (Just op) (LVar _) _) = do
+    loxError loc "Cannot perform modifying assignment on a complex pattern"
 
 eval (Assign loc mop (SetIdx lhs idx) e) = {-# SCC "eval-assign-idx" #-} do
     target <- eval lhs
@@ -782,3 +787,30 @@ loadModule loc m = do
 moduleToFileName :: ModuleIdentifier -> LoxT FilePath
 moduleToFileName (ModuleIdentifier parts) = do
     return (joinPath (map T.unpack parts) <.> "lox")
+
+bindPattern :: SourceLocation -> Pattern VarName -> LoxVal -> LoxT ()
+bindPattern _ Ignore _ = return ()
+bindPattern _ (Name v) x = gets bindings >>= liftIO . assign v x >> return ()
+-- destructure objects (more precisely, gettable things)
+bindPattern _ (FromObject []) _ = return ()
+bindPattern loc (FromObject ps) x = do
+    getter <- lookupProtocol Gettable x
+               >>= maybe (loxError loc $ "Cannot destructure " <> typeOf x) return
+    destructureObj getter ps x
+    where
+        destructureObj _ [] _ = return ()
+        destructureObj fn ((k,p):ps) x = do
+            x' <- apply loc fn [x, LoxString k] `catchError` locateError loc
+            bindPattern loc p x'
+            destructureObj fn ps x
+-- destructure arrays
+bindPattern loc (FromArray ps mp) (LoxArray (AtomArray arr)) = do
+    forM_ (zip [0 ..] ps) $ \(i, p) -> do
+        x <- liftIO (A.get i arr) `catchError` locateError loc
+        bindPattern loc p x
+    case mp of
+      Nothing -> return ()
+      Just p -> do xs <- V.toList <$> readArray (AtomArray arr)
+                   rst <- atomArray (drop (length ps) xs)
+                   bindPattern loc p rst
+bindPattern loc (FromArray _ _) x = loxError loc $ "Cannot destructure " <> typeOf x <> " as array"

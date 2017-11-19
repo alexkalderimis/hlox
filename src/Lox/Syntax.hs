@@ -94,7 +94,7 @@ data Statement' v a
     | ClassDecl SourceLocation VarName v (Maybe v) [Method' v a]
     | Continue SourceLocation
     | Declare SourceLocation v
-    | Define SourceLocation v (Expr' v a)
+    | Define SourceLocation (Pattern v) (Expr' v a)
     | DefineFn SourceLocation v (Arguments' v) (Statement' v a)
     | ExprS (Expr' v a)
     | If SourceLocation (Expr' v a) (Statement' v a) (Maybe (Statement' v a))
@@ -131,10 +131,16 @@ instance Located (Statement' v a) where
 
 type LVal = LVal' VarName LoxVal
 data LVal' v a
-    = LVar v
+    = LVar (Pattern v)
     | Set (Expr' v a) VarName
     | SetIdx (Expr' v a) (Expr' v a)
     deriving (Show, Functor, Data, Typeable)
+
+data Pattern v = Ignore
+               | Name v
+               | FromObject [(VarName, Pattern v)]
+               | FromArray [Pattern v] (Maybe (Pattern v))
+               deriving (Show, Functor, Data, Typeable)
 
 data Expr' v a
     = Literal SourceLocation a
@@ -360,8 +366,13 @@ simplify loc = let (l@(a, b, c), r@(d, e, f)) = range loc
                 in if l == r then SourceLocation a b c
                              else SourceLocation a b c :..: SourceLocation d e f
 
+patternVars :: Pattern v -> [v]
+patternVars Ignore = []
+patternVars (Name v) = [v]
+patternVars (FromArray ps mp) = (ps >>= patternVars) ++ maybe [] patternVars mp
+patternVars (FromObject pairs) = fmap snd pairs >>= patternVars
+
 $(deriveBifunctor ''LVal')
 $(deriveBifunctor ''Method')
 $(deriveBifunctor ''Statement')
 $(deriveBifunctor ''Expr')
-
