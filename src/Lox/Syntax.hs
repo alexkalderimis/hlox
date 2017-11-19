@@ -75,7 +75,7 @@ class Located a where
     sourceLoc :: a -> SourceLocation
 
 type Arguments = Arguments' VarName
-type Arguments' v = ([v], Maybe v)
+type Arguments' v = ([Pattern v], Maybe (Pattern v))
 
 newtype ModuleIdentifier = ModuleIdentifier [Text]
     deriving (Show, Eq, Data, Typeable, Generic)
@@ -184,7 +184,7 @@ type NativeFn = [LoxVal] -> LoxResult LoxVal
 type CoreClasses = (Class, Class)
 
 data Callable = BuiltIn VarName (Int -> Bool) NativeFn
-              | Function StackFrame [VarName] (Maybe VarName)
+              | Function StackFrame [Pattern VarName] (Maybe (Pattern VarName))
                          Statement CoreClasses Env
 
 instance HasStackFrame Callable where

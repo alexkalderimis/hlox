@@ -1,0 +1,21 @@
+fun foo({x, y, z: renamed, xs: [head, ..tail]}) {
+    print "x = " + x
+    print "y = " + y
+    print "z = " + renamed
+    print "head = " + head
+    print "tail = " + tail
+}
+fun bar(a, _, ..rst) {
+    print a
+    print rst
+}
+
+foo({
+    x: 100,
+    y: 200,
+    z: 300,
+    q: 400,
+    xs: [1 .. 10]
+})
+
+bar(1, 2, 3, 4, 5, 6)

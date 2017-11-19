@@ -143,15 +143,7 @@ functionBody tok = returning $
     (expect tok >> (returnStatement <|> (Return <$> loc <*> expression)))
 
 arguments :: Parser Arguments
-arguments = do
-    expect LEFT_PAREN
-    names <- manySepBy COMMA identifier
-    rest <- optional $ do
-                if null names then pure () else expect COMMA
-                expect DOT >> expect DOT
-                identifier
-    expect RIGHT_PAREN
-    return (names, rest)
+arguments = expect LEFT_PAREN *> patternList <* expect RIGHT_PAREN
 
 identifier :: Parser VarName
 identifier = do IDENTIFIER var <- next

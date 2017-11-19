@@ -36,30 +36,32 @@ assignedVars' (ClassDecl _ _ classname _ ms) = do
     where
         assignedInMethod (Constructor (vs, mv) stm) = do
             closed <- get
-            modify' (<> HS.fromList ("this":vs))
-            maybe (return ()) (modify' . HS.insert) mv
+            let bound = (vs >>= patternVars) ++ (maybe [] patternVars mv)
+            modify' (HS.insert "this")
+            modify' (<> HS.fromList bound)
             assignedVars stm <* put closed
         assignedInMethod (StaticMethod _ (vs, mv) stm) = do
             closed <- get
-            modify' (<> HS.fromList vs)
-            maybe (return ()) (modify' . HS.insert) mv
+            let bound = (vs >>= patternVars) ++ (maybe [] patternVars mv)
+            modify' (<> HS.fromList bound)
             assignedVars stm <* put closed
         assignedInMethod (InstanceMethod _ (vs, mv) stm) = do
             closed <- get
-            modify' (<> HS.fromList ("this":vs))
-            maybe (return ()) (modify' . HS.insert) mv
+            let bound = (vs >>= patternVars) ++ (maybe [] patternVars mv)
+            modify' (HS.insert "this")
+            modify' (<> HS.fromList bound)
             assignedVars stm <* put closed
 assignedVars' (Declare _ v) = mempty <$ modify' (HS.insert v)
 assignedVars' (Define _ p e) = do
     let vs = patternVars p
-    modify' $ \s -> foldr HS.insert s vs
+    modify' (<> HS.fromList vs)
     assigned <- assignments e
     return assigned
 assignedVars' (DefineFn _ v (vs, mv) body) = do
     modify' (HS.insert v)
     closed <- get
-    modify' (<> HS.fromList vs)
-    maybe (return ()) (modify' . HS.insert) mv
+    let bound = (vs >>= patternVars) ++ (maybe [] patternVars mv)
+    modify' (<> HS.fromList bound)
     assignedVars body <* put closed
 assignedVars' (ExprS e) = assignments e
 assignedVars' (If _ e stm mstm) = do
@@ -116,8 +118,8 @@ assignments' (Call _ a args) = HS.union <$> assignments a
                                         <*> (HS.unions <$> mapM assignments args)
 assignments' (Lambda _ _ (vs, mv) stm) = do
     closed <- get
-    modify' (<> HS.fromList vs)
-    maybe (return ()) (modify' . HS.insert) mv
+    let bound = (vs >>= patternVars) ++ (maybe [] patternVars mv)
+    modify' (<> HS.fromList bound)
     assignedVars stm <* put closed
 assignments' (GetField _ e _) = assignments' e
 assignments' (Index _ a b) = (<>) <$> assignments a <*> assignments b

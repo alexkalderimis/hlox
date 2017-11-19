@@ -302,7 +302,7 @@ eval :: Expr -> LoxT LoxVal
 eval (Lambda loc mname (names, rst) body) = {-# SCC "eval-lambda" #-} fmap LoxFn $
     let frame = (fromMaybe "Anonymous" mname, loc)
     in Function frame names rst body <$> (gets (object &&& array))
-                                  <*> gets bindings
+                                     <*> gets bindings
 
 eval (GetField loc e field) = {-# SCC "eval-get-field" #-} do
     inst <- eval e
@@ -554,18 +554,21 @@ apply loc (BuiltIn n _ fn) args
       where nameFunction (ArgumentError loc "" ts as) = throwError (ArgumentError loc n ts as)
             nameFunction e = throwError e
 
-apply _ (Function sf names rst body core env) args = do
+-- you can see why function calls are expensive: loads of setting up and
+-- tearing down of the environment here.
+apply loc (Function sf positional rst body core env) args = do
     old <- get -- snapshot the old environment
+    -- restore the closed over fn environment
+    modify' $ \s -> s { bindings = env, object = fst core, array = snd core }
 
     -- setup the closed over environment
-    let xs = zip names args
-    slurp <- sequence . fmap sequence $
-             [(v, atomArray (drop (length names) args)) 
-             | v <- maybeToList rst
-             ]
-    env' <- liftIO $ enterScopeWith (zip names args <> slurp) env
-    put old { bindings = env', object = fst core, array = snd core }
-    --- unwrap blocks to avoid double scoping
+    mapM_ (exec . Declare loc) ((positional ++ maybeToList rst) >>= patternVars)
+    mapM_ (uncurry $ bindPattern loc) (zip positional args)
+    case rst of
+      Nothing -> pure ()
+      Just p -> atomArray (drop (length positional) args) >>= bindPattern loc p
+
+    --- unwrap blocks to avoid pointless double scoping
     let sts = case body of Block _ sts -> sts
                            _ -> [body]
 
@@ -574,7 +577,7 @@ apply _ (Function sf names rst body core env) args = do
 
     -- restore the old environment, along with any new warnings
     ws <- gets warnings
-    put old { warnings = ws }
+    put old { warnings = warnings old <> ws }
     return r
     where
      catchReturn (LoxReturn _ v) = return v

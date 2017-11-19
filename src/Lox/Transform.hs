@@ -48,7 +48,8 @@ declareThis :: ReplaceM ()
 declareThis = void $ replaceName ("this", 0)
 
 bindArgs :: Args -> ReplaceM Args
-bindArgs (names, mname) = (,) <$> mapM replaceName names <*> mapM replaceName mname
+bindArgs (names, mname) = (,) <$> mapM handlePattern names
+                              <*> mapM handlePattern mname
 
 scoped :: ReplaceM a -> ReplaceM a
 scoped ra = do
