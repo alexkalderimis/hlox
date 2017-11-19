@@ -350,7 +350,7 @@ assignment = do
               _ -> empty
         assign' = do
             here <- loc
-            lhs <- (LVar <$> pattern) <|> lval
+            lhs <- lval <|> (LVar <$> pattern)
             op <- (Nothing <$ expect EQUAL)
                   <|> (Just Add <$ expect PLUSEQ)
                   <|> (Just Subtract <$ expect MINUSEQ)
