@@ -233,7 +233,7 @@ exec (ForLoop loc minit mcond mpost body) =
                       stms = maybeToList minit ++ [while]
                   exec (Block loc stms)
     
-exec (Iterator loc loopVar e body) = do
+exec (Iterator loc p e body) = do
     (old, env) <- modEnv enterScope
 
     obj <- eval e
@@ -245,13 +245,12 @@ exec (Iterator loc loopVar e body) = do
     return LoxNil
     where
         loop env next a = do
-            env <- liftIO (declare loopVar env)
-            putEnv env
+            mapM_ (exec . Declare loc) (patternVars p)
             (ma, a') <- fromLoxResult (sourceLoc e) (next a)
             case ma of
               Nothing -> return LoxNil
               Just curr -> do
-                  liftIO (assign loopVar curr env)
+                  bindPattern loc p curr
                   exec body
                   loop env next a'
 

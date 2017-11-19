@@ -84,11 +84,11 @@ handleStatement (ClassDecl loc name var super ms) = do
     ms' <- mapM handleMethod ms
     return (ClassDecl loc name var' super' ms')
 
-handleStatement (Iterator loc name expr stm) = do
+handleStatement (Iterator loc p expr stm) = do
     expr' <- handleExpr expr
-    name' <- replaceName name
+    p' <- handlePattern p
     stm' <- scoped (handleStatement stm)
-    return (Iterator loc name' expr' stm')
+    return (Iterator loc p' expr' stm')
 
 handleStatement (ForLoop loc before cond after body) = scoped $ do
     before' <- traverse handleStatement before

@@ -98,7 +98,7 @@ data Statement' v a
     | DefineFn SourceLocation v (Arguments' v) (Statement' v a)
     | ExprS (Expr' v a)
     | If SourceLocation (Expr' v a) (Statement' v a) (Maybe (Statement' v a))
-    | Iterator SourceLocation v (Expr' v a) (Statement' v a)
+    | Iterator SourceLocation (Pattern v) (Expr' v a) (Statement' v a)
     | ForLoop SourceLocation (Maybe (Statement' v a))
                              (Maybe (Expr' v a))
                              (Maybe (Statement' v a))

@@ -1,0 +1,11 @@
+let people = [
+  {name: "Joe", age: 17, likes: ["apples","pizza","eggs"]},
+  {name: "Jane", age: 23, likes: ["avocado", "science"]}
+  ]
+
+for ({name: who, age: years, likes: [fav, ..others]} in people) {
+    print who + " (" + years + " years old): favourite food is " + fav
+    for (food in others) {
+        print "  also likes: " + food
+    }
+}

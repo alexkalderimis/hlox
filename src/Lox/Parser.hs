@@ -260,7 +260,7 @@ newStyleForLoop = do
     keyword "for"
     start <- loc
     expect LEFT_PAREN
-    IDENTIFIER loopVar <- next
+    p <- pattern
     keyword "in"
     iteree <- expression
     expect RIGHT_PAREN
@@ -268,7 +268,7 @@ newStyleForLoop = do
     end <- loc
 
     let here = span start end
-    return (Iterator here loopVar iteree body)
+    return (Iterator here p iteree body)
 
 predicate :: Parser Expr
 predicate = do

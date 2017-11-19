@@ -67,9 +67,10 @@ assignedVars' (If _ e stm mstm) = do
     b <- assignedVars stm
     c <- maybe (return mempty) assignedVars mstm
     return (a <> b <> c)
-assignedVars' (Iterator _ v e stm) = do
-    a <- assignments e
+assignedVars' (Iterator _ p e stm) = do
     closed <- get
+    a <- assignments e
+    put (foldr HS.insert closed $ patternVars p)
     b <- assignedVars stm
     return (a <> b) <* put closed
 assignedVars' (ForLoop _ minit mcond mpost body) = do
