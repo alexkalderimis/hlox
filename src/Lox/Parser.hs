@@ -95,10 +95,9 @@ importStatement = do
     keyword "import"
     start <- loc
     m <- ModuleIdentifier <$> manySepBy DOT identifier
-    keyword "as"
-    v <- identifier
+    mp <- optional (keyword "as" >> pattern)
     end <- loc
-    return (Import (span start end) m v)
+    return (Import (span start end) m mp)
 
 classDeclaration :: Parser Statement
 classDeclaration = do

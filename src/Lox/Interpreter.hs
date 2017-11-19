@@ -71,11 +71,15 @@ runProgram = foldM runStatement LoxNil
 
 exec :: Statement -> LoxT LoxVal
 
-exec (Import loc mod var) = do
+exec (Import loc mod mp) = do
     mod <- getModule loc mod
-    exec (Declare loc var)
-    gets bindings >>= liftIO . assign var (LoxObj mod)
-    return LoxNil
+    -- in the context of imports, _ means import all
+    p <- case mp of
+           Just FromArray{} -> loxError loc "Cannot use array destructuring in import"
+           Just p -> return p
+           Nothing -> do flds <- liftIO . atomically $ readTVar (objectFields mod)
+                         return (FromObject [(k, Name k) | k <- HM.keys flds])
+    exec (Define loc p (Literal loc (LoxObj mod)))
 
 exec (Print _ e) = do v <- eval e
                       printLox v

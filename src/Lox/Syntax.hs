@@ -108,7 +108,7 @@ data Statement' v a
     | Throw SourceLocation (Expr' v a)
     | Try SourceLocation (Statement' v a) [(v, (Statement' v a))]
     | While SourceLocation (Expr' v a) (Statement' v a)
-    | Import SourceLocation ModuleIdentifier v
+    | Import SourceLocation ModuleIdentifier (Maybe (Pattern v))
     deriving (Show, Data, Typeable, Functor)
 
 instance Located (Statement' v a) where
