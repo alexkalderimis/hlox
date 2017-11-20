@@ -10,11 +10,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Lox.Syntax where
 
 import Control.Monad.IO.Class
 import Control.Exception.Base (Exception)
+import Data.Bifunctor
 import Data.Fixed
 import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable, hash)
@@ -25,7 +28,7 @@ import Data.Text hiding (unwords, length, reverse)
 import Data.Data (Typeable, Data)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
-import Lox.Environment (Environment)
+import Lox.Environment (readEnv, Environment)
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Bifunctor.TH
 import Control.Concurrent.STM
@@ -157,7 +160,7 @@ data Expr' v a
     | Index SourceLocation (Expr' v a) (Expr' v a)
     | Array SourceLocation [Expr' v a]
     | ArrayRange SourceLocation (Expr' v a) (Expr' v a)
-    | Mapping SourceLocation [(VarName, Expr' v a)]
+    | Mapping SourceLocation [(Atom, Expr' v a)]
     deriving (Show, Functor, Data, Typeable)
 
 instance Located (Expr' v a) where
@@ -209,23 +212,21 @@ instance Show Callable where
 
 -- out of the parse stage there is a limited set of values that
 -- may be instantiated.
-data Literal
-    = LitNil
-    | LitBool !Bool
-    | LitInt !Int
-    | LitDbl !Double
-    | LitString !Text
-    deriving (Show, Eq, Data, Typeable)
+data Atom
+    = Nil
+    | ABool !Bool
+    | AInt {-# UNPACK #-} !Int
+    | ADbl {-# UNPACK #-} !Double
+    | Str !Text
+    deriving (Show, Ord, Eq, Data, Typeable, Generic)
 
-type Parsed = [Statement' VarName Literal]
+instance Hashable Atom
+
+type Parsed = [Statement' VarName Atom]
 
 data LoxVal
     -- Atomic values
-    = LoxNil
-    | LoxBool !Bool
-    | LoxInt {-# UNPACK #-} !Int
-    | LoxDbl {-# UNPACK #-} !Double
-    | LoxString !Text
+    = LoxLit !Atom
     -- Composite stuff
     | LoxFn !Callable
     | LoxClass !Class
@@ -234,15 +235,31 @@ data LoxVal
     | LoxIter !Stepper
     deriving (Show)
 
+-- helper patterns to avoiding verbose literals
+pattern LoxNil = LoxLit Nil
+pattern LoxNum d <- LoxLit (asDbl -> Just d)
+pattern LoxInt i = LoxLit (AInt i)
+pattern LoxDbl i = LoxLit (ADbl i)
+pattern Txt t = LoxLit (Str t)
+pattern LoxString t = LoxLit (Str t) -- shim
+pattern LoxBool b = LoxLit (ABool b)
+pattern Yes = LoxLit (ABool True)
+pattern No = LoxLit (ABool False)
+
+asDbl :: Atom -> Maybe Double
+asDbl (ADbl d) = Just d
+asDbl (AInt i) = Just (fromIntegral i)
+asDbl _ = Nothing
+
 instance Default LoxVal where
-    def = LoxNil
+    def = LoxLit Nil
 
 typeOf :: LoxVal -> String
-typeOf LoxNil = "nil"
-typeOf (LoxBool _) = "Boolean"
-typeOf (LoxInt _) = "Number"
-typeOf (LoxDbl _) = "Number"
-typeOf (LoxString _) = "String"
+typeOf (LoxLit Nil) = "nil"
+typeOf (LoxLit ABool{}) = "Boolean"
+typeOf (LoxLit AInt{}) = "Number"
+typeOf (LoxLit ADbl{}) = "Number"
+typeOf (LoxLit Str{}) = "String"
 typeOf (LoxFn _) = "Function"
 typeOf (LoxClass _) = "Class"
 typeOf (LoxObj c) = T.unpack (className $ objectClass c)
@@ -251,7 +268,7 @@ typeOf (LoxIter _) = "Iterator"
 
 type LoxException = LoxException' LoxVal
 data LoxException' a = LoxError SourceLocation String
-                  | FieldNotFound SourceLocation VarName
+                  | FieldNotFound SourceLocation Atom
                   | LoxReturn SourceLocation a
                   | LoxBreak SourceLocation
                   | LoxContinue SourceLocation
@@ -277,7 +294,7 @@ arrayFromList :: (Monad m, MonadIO m) => [LoxVal] -> m AtomArray
 arrayFromList xs = AtomArray <$> (liftIO $  A.fromList xs)
 
 nil :: LoxVal -> Bool
-nil LoxNil = True
+nil (LoxLit Nil) = True
 nil _ = False
 
 readArray :: MonadIO m => AtomArray -> m (Vector LoxVal)
@@ -316,7 +333,7 @@ instance Located Class where
 
 data Object = Object
     { objectClass :: Class
-    , objectFields :: TVar (HM.HashMap VarName LoxVal)
+    , objectFields :: TVar (HM.HashMap Atom LoxVal)
     }
 
 instance Eq Object where
@@ -371,6 +388,11 @@ patternVars Ignore = []
 patternVars (Name v) = [v]
 patternVars (FromArray ps mp) = (ps >>= patternVars) ++ maybe [] patternVars mp
 patternVars (FromObject pairs) = fmap snd pairs >>= patternVars
+
+envToFields :: Env -> IO (TVar (HM.HashMap Atom LoxVal))
+envToFields env = do
+    bindings <- HM.toList <$> readEnv env
+    newTVarIO (HM.fromList $ fmap (first Str) bindings)
 
 $(deriveBifunctor ''LVal')
 $(deriveBifunctor ''Method')

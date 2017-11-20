@@ -54,10 +54,10 @@ getElement [LoxArray (AtomArray arr), LoxInt i] | i >= 0 = do
     n <- A.size arr
     if i < n
        then Right <$> A.get i arr
-       else return . Left $ FieldNotFound NativeCode (fromString $ show i)
+       else return . Left $ FieldNotFound NativeCode (AInt i)
 getElement [this@LoxArray{}, LoxString k] = do
     case HM.lookup k (methods array) of
-      Nothing -> return . Left $ FieldNotFound Unlocated k
+      Nothing -> return . Left $ FieldNotFound Unlocated (Str k)
       Just fn -> run (LoxFn <$> bindThis this fn)
 getElement [LoxArray _, LoxInt i]
     = return . Left . LoxError NativeCode

@@ -20,7 +20,7 @@ random = Object emptyClass <$> newTVarIO (HM.fromList flds)
                ,fn "char" (== 0) randomChar
                ,fn "range" (== 2) randomRange
                ]
-        fn name arity f = (name, LoxFn $ BuiltIn ("Random." <> name) arity f)
+        fn name arity f = (Str name, LoxFn $ BuiltIn ("Random." <> name) arity f)
 
 randomInt :: NativeFn
 randomInt _ = Right . LoxInt <$> randomIO

@@ -20,7 +20,7 @@ object = Object emptyClass <$> newTVarIO (HM.fromList flds)
     where
         flds = [fn "run" (== 1) runThread
                ]
-        fn name arity f = (name, LoxFn $ BuiltIn ("Random." <> name) arity f)
+        fn name arity f = (Str name, LoxFn $ BuiltIn ("Random." <> name) arity f)
 
 runThread :: NativeFn
 runThread [LoxFn fn] = do

@@ -34,7 +34,7 @@ objectKeys :: NativeFn
 
 objectKeys [LoxObj o] = liftIO $ do
     hm <- atomically . readTVar $ objectFields o
-    vs <- AtomArray <$> A.fromList (fmap LoxString $ HM.keys hm)
+    vs <- AtomArray <$> A.fromList (fmap LoxLit $ HM.keys hm)
     return (Right $ LoxArray vs)
 
 objectEntries :: NativeFn
@@ -45,12 +45,12 @@ objectEntries [LoxObj o] = do
     return (Right vs)
     where
         atomArray = LoxArray . AtomArray
-        pair (k, v) =  atomArray <$> A.fromList [LoxString k, v]
+        pair (k, v) =  atomArray <$> A.fromList [LoxLit k, v]
 
 iterator :: NativeFn
 
 iterator [LoxObj o] = do
-    keys <- fmap LoxString . HM.keys <$> fields o
+    keys <- fmap LoxLit . HM.keys <$> fields o
     let next []     = return $ Right (Nothing, [])
         next (k:ks) = return $ Right (Just k, ks)
         it = Stepper keys next
@@ -58,25 +58,26 @@ iterator [LoxObj o] = do
 
 getField :: NativeFn
 
-getField [LoxObj inst@Object{..}, LoxString k] = do
+getField [LoxObj inst@Object{..}, LoxLit k] = do
     hm <- fields inst
     case HM.lookup k hm of
       Nothing -> getMethod objectClass inst k
       Just v -> return (Right v)
 
-getMethod :: Class -> Object -> VarName -> LoxResult LoxVal
-getMethod cls inst k = do
-    case HM.lookup k (methods cls) of
-      Nothing -> case superClass cls of
-                   Nothing -> fieldNotFound
-                   Just sup -> getMethod sup inst k
-      Just fn -> run (LoxFn <$> bindThis (LoxObj inst) fn)
+getMethod :: Class -> Object -> Atom -> LoxResult LoxVal
+getMethod cls inst key
+    | (Str k) <- key = case HM.lookup k (methods cls) of
+                        Nothing -> case superClass cls of
+                                     Nothing -> fieldNotFound
+                                     Just sup -> getMethod sup inst (Str k)
+                        Just fn -> run (LoxFn <$> bindThis (LoxObj inst) fn)
+    | otherwise      = fieldNotFound
     where
-        fieldNotFound = return . Left $ FieldNotFound Unlocated k
+        fieldNotFound = return . Left $ FieldNotFound Unlocated key
 
 setField :: NativeFn
 
-setField [LoxObj Object{..}, LoxString k, v] =
+setField [LoxObj Object{..}, LoxLit k, v] =
     Right v <$ (atomically $ modifyTVar' objectFields (HM.insert k v))
 
 setField args = argumentError ["Object", "String", "Any"] args
@@ -84,5 +85,5 @@ setField args = argumentError ["Object", "String", "Any"] args
 run :: LoxT LoxVal -> LoxResult LoxVal
 run lox = interpreter [] mempty >>= runLoxT lox
 
-fields :: Object -> IO (HM.HashMap VarName LoxVal)
+fields :: Object -> IO (HM.HashMap Atom LoxVal)
 fields = atomically . readTVar . objectFields

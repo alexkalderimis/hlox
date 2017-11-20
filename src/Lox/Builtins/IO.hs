@@ -20,19 +20,19 @@ object = Object emptyClass <$> newTVarIO (HM.fromList flds)
         flds = [fn "readFile" (== 1) readFile'
                ,fn "gets" (== 0) readLn'
                ]
-        fn name arity f = (name, LoxFn $ BuiltIn ("IO." <> name) arity f)
+        fn name arity f = (Str name, LoxFn $ BuiltIn ("IO." <> name) arity f)
 
 readFile' :: NativeFn
-readFile' [LoxString fn] = do
+readFile' [Txt fn] = do
     content <- callIO (T.readFile (T.unpack fn))
-    return (fmap LoxString content)
+    return (fmap Txt content)
 
 readLn' :: NativeFn
 readLn' [] = do
     content <- callIO T.getLine
-    return (fmap LoxString content)
+    return (fmap Txt content)
 
 callIO :: IO a -> LoxResult a
-callIO io = liftIO $ (Right <$> io) `catch` h
-    where h :: IOException -> LoxResult a
-          h = return . Left . LoxError NativeCode .show
+callIO io = first asLoxException <$> try io
+    where asLoxException :: IOException -> LoxException
+          asLoxException = LoxError NativeCode . show

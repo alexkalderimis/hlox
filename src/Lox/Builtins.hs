@@ -4,7 +4,7 @@
 
 module Lox.Builtins (initInterpreter) where
 
-import Control.Exception (catch)
+import Control.Exception (try, catch)
 import Control.Concurrent.STM
 import Control.Concurrent (threadDelay)
 import Data.IORef
@@ -61,7 +61,7 @@ errorCls = emptyClass
 
 setErrorMsg :: NativeFn
 setErrorMsg [LoxObj Object{..}, msg] = fromSTM $ do
-    modifyTVar' objectFields $ HM.insert "message" msg
+    modifyTVar' objectFields $ HM.insert (Str "message") msg
     return LoxNil
 
 typeofFn :: NativeFn
@@ -84,10 +84,10 @@ maths :: IO Object
 maths = Object O.baseClass <$> newTVarIO (HM.fromList flds)
     where
        flds = 
-           [("pi",  LoxDbl pi)
-           ,("sin", LoxFn (BuiltIn "Math.sin" (== 1) (mathsFn sin)))
-           ,("cos", LoxFn (BuiltIn "Math.cos" (== 1) (mathsFn cos)))
-           ,("tan", LoxFn (BuiltIn "Math.tan" (== 1) (mathsFn tan)))
+           [(Str "pi",  LoxDbl pi)
+           ,(Str "sin", LoxFn (BuiltIn "Math.sin" (== 1) (mathsFn sin)))
+           ,(Str "cos", LoxFn (BuiltIn "Math.cos" (== 1) (mathsFn cos)))
+           ,(Str "tan", LoxFn (BuiltIn "Math.tan" (== 1) (mathsFn tan)))
            ]
        mathsFn f [LoxDbl n] = return (Right . LoxDbl $ f n)
        mathsFn f [LoxInt n] = mathsFn f [LoxDbl $ fromIntegral n]
@@ -97,4 +97,4 @@ run :: LoxT LoxVal -> LoxResult LoxVal
 run lox = interpreter [] mempty >>= runLoxT lox
 
 fromSTM :: STM a -> LoxResult a
-fromSTM stm = (Right <$> atomically stm) `catch` (return . Left)
+fromSTM stm = try (atomically stm)

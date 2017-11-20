@@ -22,13 +22,13 @@ import Lox.Syntax
 
 type ReplaceM = State (Int, HM.HashMap VarName Int)
 
-type Replaced = [Statement' Variable Literal]
+type Replaced = [Statement' Variable Atom]
 
 type Variable = (VarName, Int)
-type St = Statement' Variable Literal
-type Exp = Expr' Variable Literal
-type Meth = Method' Variable Literal
-type LV = LVal' Variable Literal
+type St = Statement' Variable Atom
+type Exp = Expr' Variable Atom
+type Meth = Method' Variable Atom
+type LV = LVal' Variable Atom
 type Args = Arguments' Variable
 
 renameVars :: Parsed -> Replaced

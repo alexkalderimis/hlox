@@ -18,9 +18,9 @@ import Lox.Scanner (Tokens, Token(..))
 import Debug.Trace
 
 -- here we parse literals, not all possible values
-type Statement = Statement' VarName Literal
-type Expr = Expr' VarName Literal
-type Method = Method' VarName Literal
+type Statement = Statement' VarName Atom
+type Expr = Expr' VarName Atom
+type Method = Method' VarName Atom
 
 data ParserState = ParserState
     { tokens :: !Tokens
@@ -190,7 +190,7 @@ returnStatement = do
     if not b then fatal "Cannot return outside a function body"
              else do l <- loc
                      mval <- optional expression
-                     return (Return l (fromMaybe (Literal l LitNil) mval))
+                     return (Return l (fromMaybe (Literal l Nil) mval))
 
 loopControl :: Parser Statement
 loopControl = do
@@ -352,7 +352,7 @@ assignment = do
             here <- loc
             lhs <- lval
             op <- (Add <$ expect PLUSPLUS) <|> (Subtract <$ expect MINUSMINUS)
-            let rhs = Literal here $ LitInt 1
+            let rhs = Literal here $ AInt 1
             return (Assign here (Just op) lhs rhs)
 
 pattern :: Parser (Pattern VarName)
@@ -469,7 +469,12 @@ fnExpr = do
     return (Lambda (span start end) Nothing args body)
 
 atom :: Parser Expr
-atom = ident <|> array <|> arrayRange <|> mapping <|> literal <|> group
+atom = ident
+    <|> array
+    <|> arrayRange
+    <|> mapping
+    <|> (uncurry Literal <$> literal)
+    <|> group
   where
       ident = do t <- next
                  l <- loc
@@ -503,28 +508,23 @@ atom = ident <|> array <|> arrayRange <|> mapping <|> literal <|> group
                    expect RIGHT_BRACE
                    end <- loc
                    return $ Mapping (span start end) ps
-      keyval = do k <- do t <- next
-                          case t of
-                            IDENTIFIER k -> return k
-                            STRING k -> return k
-                            _ -> empty
+      keyval = do k <- (snd <$> literal) <|> (Str <$> identifier)
                   expect COLON
                   v <- assignment
                   return (k, v)
       literal = do
             t <- next
             l <- loc
-            a <- case t of
-                STRING s -> return $ LitString  s
-                NUMBER n -> return $ LitDbl n
-                INT n    -> return $ LitInt n
-                KEYWORD kw -> case kw of
-                                "true" -> return $ LitBool True
-                                "false" -> return $ LitBool False
-                                "nil" -> return $ LitNil
-                                _ -> backtrack ("Unexpected keyword " <> pack (show kw))
-                _ -> backtrack ("Unexpected token " <> pack (show t))
-            return (Literal l a)
+            (l,) <$> case t of
+                  STRING s -> return $ Str  s
+                  NUMBER n -> return $ ADbl n
+                  INT n    -> return $ AInt n
+                  KEYWORD kw -> case kw of
+                                  "true" -> return $ ABool True
+                                  "false" -> return $ ABool False
+                                  "nil" -> return $ Nil
+                                  _ -> backtrack ("Unexpected keyword " <> pack (show kw))
+                  _ -> backtrack ("Unexpected token " <> pack (show t))
 
 type Keyword = Text
 

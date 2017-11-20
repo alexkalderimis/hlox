@@ -4,6 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Lox.Interpreter where
 
@@ -16,6 +17,7 @@ import Control.Arrow ((&&&), second)
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Control.Monad (when)
+import Data.Default (def)
 import Data.Char (toLower)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
@@ -66,7 +68,7 @@ run :: Env -> Program -> IO Value
 run env program = interpreter [] env >>= runLoxT (runProgram program)
 
 runProgram :: Program -> LoxT LoxVal
-runProgram = foldM runStatement LoxNil
+runProgram = foldM runStatement def
     where runStatement _ s = exec s
 
 exec :: Statement -> LoxT LoxVal
@@ -78,12 +80,12 @@ exec (Import loc mod mp) = do
            Just FromArray{} -> loxError loc "Cannot use array destructuring in import"
            Just p -> return p
            Nothing -> do flds <- liftIO . atomically $ readTVar (objectFields mod)
-                         return (FromObject [(k, Name k) | k <- HM.keys flds])
+                         return (FromObject [(k, Name k) | (Str k) <- HM.keys flds])
     exec (Define loc p (Literal loc (LoxObj mod)))
 
 exec (Print _ e) = do v <- eval e
                       printLox v
-                      return LoxNil
+                      return def
 exec (ExprS e) = {-# SCC "exec-expr" #-} eval e
 
 exec (Throw loc e) = do v <- eval e
@@ -104,7 +106,7 @@ exec (Define loc p e) = {-# SCC "exec-define" #-} do
 exec (Declare _ v) = do
     env <- gets bindings >>= liftIO . declare v
     putEnv env
-    return LoxNil
+    return def
 
 exec (ClassDecl loc name _ msuper methods) = do
     exec (Declare loc name)
@@ -152,19 +154,19 @@ exec (Block _ sts) = do
     (env, _) <- modEnv enterScope
     mapM_ exec sts
     putEnv env
-    return LoxNil
+    return def
 
 exec (If _ condition a mb) = {-# SCC "exec-while" #-} do
     p <- truthy <$> eval condition
     if p
         then exec a
-        else maybe (return LoxNil) exec mb
+        else maybe (return def) exec mb
 exec (While _ condition body) = loop
     where
         loop = do p <- truthy <$> eval condition
                   if p then do broke <- (False <$ exec body) `catchError` loopH
-                               if broke then return LoxNil else loop
-                       else return LoxNil
+                               if broke then return def else loop
+                       else return def
         loopH (LoxBreak _)    = return True
         loopH (LoxContinue _) = return False
         loopH e           = throwError e
@@ -190,7 +192,7 @@ exec (ForLoop loc minit mcond mpost body) =
     where
         comp LessThan = (<)
         comp LessThanEq = (<=)
-        loop = Literal loc (LoxBool True)
+        loop = Literal loc Yes
         -- the optimised loop prevents most loop bookkeeping - preventing
         -- lookups of the loop var and function application of the post-cond.
         optimisedLoop i var comp' limit = do
@@ -207,17 +209,17 @@ exec (ForLoop loc minit mcond mpost body) =
         whileLoop ref comp' limit curr = do
             p <- compareLimit (comp' curr) limit
             if not p
-              then return LoxNil
+              then return def
               else do broke <- runLoop (setRef ref curr >> exec body)
-                      if broke then return LoxNil else (whileLoop ref comp' limit (curr + 1))
+                      if broke then return def else (whileLoop ref comp' limit (curr + 1))
 
         {-# INLINE compareLimit #-}
         compareLimit f limit = do 
             limit' <- eval limit
             case limit' of
-              LoxNil -> return True
-              LoxInt j -> return (f j)
-              LoxDbl j -> return (f $ round j)
+              LoxLit Nil -> return True
+              LoxLit (AInt j) -> return (f j)
+              LoxLit (ADbl j) -> return (f $ round j)
               _ -> loxError (sourceLoc limit)
                             $ "cannot compare " <> typeOf limit'
 
@@ -550,7 +552,8 @@ apply loc fn args | not (arity fn (length args)) = loxError loc msg
         msg = "Wrong number of arguments."
 
 apply loc (BuiltIn n _ fn) args
-  = fromLoxResult loc (fn args) `catchError` nameFunction
+  = fromLoxResult loc (fn args) `catchError` locateError loc
+                                `catchError` nameFunction
       where nameFunction (ArgumentError loc "" ts as) = throwError (ArgumentError loc n ts as)
             nameFunction e = throwError e
 
@@ -639,7 +642,7 @@ numericalFn name _ _ a b = throw' $ concat [ "Cannot apply operator: "
 
 stringify :: LoxVal -> LoxT String
 stringify LoxNil = return "nil"
-stringify (LoxString t) = return $ T.unpack t
+stringify (Txt t) = return $ T.unpack t
 stringify (LoxBool b) = return $ fmap toLower (show b)
 stringify (LoxInt n) = return $ show n
 stringify (LoxDbl n) = return $ printf "%f" n
@@ -654,7 +657,7 @@ stringify (LoxObj Object{..}) = do
     fs' <- mapM (sequence . second stringify) fs
     return $ concat
            $ ["{"]
-             ++ L.intersperse "," [T.unpack k <> ":" <> v | (k, v) <- fs']
+             ++ L.intersperse "," [T.unpack k <> ":" <> v | (Str k, v) <- fs']
              ++ ["}"]
 stringify (LoxArray arr) = do
     vs <- readArray arr
@@ -665,7 +668,7 @@ stringify (LoxArray arr) = do
                     ]
 
 quoteString :: LoxVal -> LoxT String
-quoteString s@LoxString{} = fmap (\s -> '"' : s <> "\"") (stringify s)
+quoteString (Txt t) = return ('"' : T.unpack t ++ "\"")
 quoteString a = stringify a
 
 isInteger :: Double -> Bool
@@ -706,15 +709,8 @@ binaryFns = HM.fromList
 a            === b            = fmap (== EQ) (a <=> b)
 
 (<=>) :: LoxVal -> LoxVal -> LoxT Ordering
-LoxNil        <=> LoxNil = return EQ
-LoxNil        <=> _      = return LT
-_             <=> LoxNil = return GT
-(LoxBool a)   <=> (LoxBool b)   = return (a `compare` b)
-(LoxDbl a)    <=> (LoxDbl b)    = return (a `compare` b)
-(LoxInt a)    <=> (LoxInt b)    = return (a `compare` b)
-(LoxDbl a)    <=> (LoxInt b)    = return (a `compare` fromIntegral b)
-(LoxInt a)    <=> (LoxDbl b)    = return (fromIntegral a `compare` b)
-(LoxString a) <=> (LoxString b) = return (a `compare` b)
+LoxLit (asDbl -> Just a) <=> LoxLit (asDbl -> Just b) = return (a `compare` b)
+LoxLit a                 <=> LoxLit b = return (a `compare` b)
 (LoxArray (AtomArray a))  <=> (LoxArray (AtomArray b))  = do
     as <- liftIO $ A.readArray a
     bs <- liftIO $ A.readArray b
@@ -785,7 +781,7 @@ loadModule loc m = do
     put (moduleInterpreter s)
     env <- runProgram (fromParsed parsed) >> gets bindings
     put s
-    vals <- liftIO (readEnv (diffEnv (bindings s) env) >>= newTVarIO)
+    vals <- liftIO (envToFields $ diffEnv (bindings s) env)
     return (Object (moduleCls s) vals)
     where
         fileNotFound n _ = loxError loc ("Could not find module: " <> show n)
@@ -806,7 +802,7 @@ bindPattern loc (FromObject ps) x = do
     where
         destructureObj _ [] _ = return ()
         destructureObj fn ((k,p):ps) x = do
-            x' <- apply loc fn [x, LoxString k] `catchError` locateError loc
+            x' <- apply loc fn [x, LoxString k]
             bindPattern loc p x'
             destructureObj fn ps x
 -- destructure arrays

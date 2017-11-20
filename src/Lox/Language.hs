@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 module Lox.Language (
     module Lox.Scanner,
     module Lox.Parser,
@@ -15,6 +17,7 @@ import Lox.Syntax (
     Env, LoxException, LoxException'(..),
     Expr, Expr'(..), Statement, Statement'(..),
     Program, Parsed, Value, LoxResult,
+    pattern LoxNil, pattern LoxNum, pattern LoxInt, pattern LoxDbl,
     LoxVal(..), SourceLocation(..), typeOf, range, nil)
 import Lox.Parser (
     tokenStream, expression, program, ParseError(..), Parser(runParser))
