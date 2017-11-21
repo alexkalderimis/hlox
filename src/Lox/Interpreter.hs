@@ -529,6 +529,7 @@ lookupProtocol p a = do
 classOf :: LoxVal -> LoxT (Maybe Class)
 classOf (LoxObj o) = return (Just $ objectClass o)
 classOf (LoxArray _) = Just <$> gets array
+classOf (LoxString _) = Just <$> gets string
 classOf _ = return Nothing
 
 instantiate :: SourceLocation -> Class -> [LoxVal] -> LoxT LoxVal

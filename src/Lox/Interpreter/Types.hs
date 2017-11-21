@@ -96,6 +96,7 @@ data Interpreter = Interpreter
     , object :: !Class -- the base class all classes must inherit from
     , array :: !Class -- the class of arrays
     , moduleCls :: !Class -- the class of modules
+    , string :: !Class -- the class of strings
     }
 
 interpreter :: [(ModuleIdentifier, Object)] -> Env -> IO Interpreter
@@ -105,6 +106,7 @@ interpreter modules env = do
     Interpreter env env mods mempty False [] <$> getClass "Object"
                                              <*> getClass "Array"
                                              <*> pure mod
+                                             <*> getClass "String"
     where
         getMod = do cls <- getClass "Object"
                     cid <- newSingleton

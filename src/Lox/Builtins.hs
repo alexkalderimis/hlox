@@ -21,6 +21,7 @@ import Lox.Interpreter.Types (LoxT, Interpreter, runLoxT, interpreter)
 import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O
 import qualified Lox.Builtins.Random as R
+import qualified Lox.Builtins.String as S
 import qualified Lox.Builtins.IO as LoxIO
 import qualified Lox.Builtins.Thread as Thread
 
@@ -40,7 +41,7 @@ builtinModules = sequenceA $ fmap sequenceA
 
 builtins :: IO Env
 builtins = enterScopeWith vals mempty
-    where vals = classes [A.array, O.baseClass, errorCls]
+    where vals = classes [A.array, O.baseClass, errorCls, S.string]
                  ++
                  [("clock", LoxFn (BuiltIn "clock" (== 0) clock))
                  ,("apply", LoxFn (BuiltIn "apply" (== 2) applyFun))
