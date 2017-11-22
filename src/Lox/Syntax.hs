@@ -342,8 +342,8 @@ data LoxVal
 
 -- helper patterns to avoiding verbose literals
 pattern LoxNil = LoxLit Nil
-pattern LoxNum d <- LoxLit (asDbl -> Just d)
-pattern Intish n <- LoxLit (asInt -> Just n)
+pattern LoxNum d <- LoxLit (asDbl -> Just d) -- for things that can be interpreted as doubles
+pattern Intish n <- LoxLit (asInt -> Just n) 
 pattern LoxInt i = LoxLit (AInt i)
 pattern LoxDbl i = LoxLit (ADbl i)
 pattern Txt t = LoxLit (Str t)
@@ -357,9 +357,11 @@ asDbl (ADbl d) = Just d
 asDbl (AInt i) = Just (fromIntegral i)
 asDbl _ = Nothing
 
+-- coerce to int, if the conversion is lossless.
 asInt :: Atom -> Maybe Int
 asInt (AInt i) = Just i
-asInt (ADbl d) = Just (round d)
+asInt (ADbl d) = let i = round d
+                  in if d == fromIntegral i then Just i else Nothing
 asInt _ = Nothing
 
 instance Default LoxVal where
