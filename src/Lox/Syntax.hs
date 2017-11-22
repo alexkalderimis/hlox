@@ -23,6 +23,7 @@ import Data.Fixed
 import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable, hash)
 import Data.Default
+import Data.Proxy
 import Data.IORef
 import Data.Monoid
 import Data.Text hiding (unwords, length, reverse)
@@ -183,6 +184,18 @@ instance Located (Expr' v a) where
 -- Native function that supports errors and IO
 type NativeFn = [LoxVal] -> LoxResult LoxVal
 
+class HasArity f where
+    getArity :: (Proxy f) -> Int
+
+instance IsLoxVal v => HasArity (IO v) where
+    getArity _ = 0
+
+instance HasArity LoxVal where
+    getArity _ = 0
+
+instance HasArity r => HasArity (v -> r) where
+    getArity _ = 1 + getArity (Proxy :: Proxy r)
+
 class IsNativeFn f where
     toNativeFn :: f -> NativeFn
 
@@ -199,11 +212,15 @@ class IsLoxVal v where
     toLoxVal ::  v -> LoxVal
     fromLoxVal :: LoxVal -> Either LoxException v
 
-natively :: (IsLoxVal v, IsLoxVal r) => (v -> r) -> NativeFn
-natively f = toNativeFn (io . f)
+natively :: (IsLoxVal v, IsLoxVal r) => VarName -> (v -> r) -> Callable
+natively n f = BuiltIn n (== 1) (toNativeFn (io . f))
     where
         io :: a -> IO a
         io = return
+
+callable :: forall f. (HasArity f, IsNativeFn f) => VarName -> f -> Callable
+callable n f = let a = getArity (Proxy :: Proxy f)
+                in BuiltIn n (== a) (toNativeFn f)
 
 instance IsLoxVal LoxVal where
     toLoxVal = id
@@ -258,6 +275,9 @@ instance (IsLoxVal v) => IsNativeFn (IO v) where
     toNativeFn _ as = return . Left . LoxError Unlocated
                         $ "Unexpected arguments: " <> show (fmap typeOf as)
 
+instance IsNativeFn LoxVal where
+    toNativeFn r = toNativeFn (return r :: IO LoxVal)
+
 -- functions carry around references to Object and Array
 -- which lets us use literal notation.
 type CoreClasses = (Class, Class)
@@ -265,6 +285,15 @@ type CoreClasses = (Class, Class)
 data Callable = BuiltIn VarName (Int -> Bool) NativeFn
               | Function StackFrame [Pattern VarName] (Maybe (Pattern VarName))
                          Statement CoreClasses Env
+
+fnName :: Callable -> VarName
+fnName (BuiltIn n _ _) = n
+fnName (Function (n,_) _ _ _ _ _) = n
+
+qualifyName :: VarName -> Callable -> Callable
+qualifyName p (BuiltIn n a f) = BuiltIn (p <> n) a f
+qualifyName p (Function (n,loc) args rest body classes env)
+    = Function (p <> n, loc) args rest body classes env
 
 instance HasStackFrame Callable where
     stackFrame (BuiltIn sf _ _) = (sf, NativeCode)

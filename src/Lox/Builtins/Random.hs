@@ -13,30 +13,20 @@ import Lox.Syntax hiding (arity)
 import qualified Lox.Builtins.Object as O
 
 random :: IO Object
-random = Object emptyClass <$> newTVarIO (HM.fromList flds)
+random = Object emptyClass <$> newTVarIO (HM.fromList fields)
     where
-        flds = [fn "int" (== 0) randomInt
-               ,fn "float" (== 0) randomFloat
-               ,fn "char" (== 0) randomChar
-               ,fn "range" (== 2) randomRange
-               ]
-        fn name arity f = (Str name, LoxFn $ BuiltIn ("Random." <> name) arity f)
-
-randomInt :: NativeFn
-randomInt _ = Right . LoxInt <$> randomIO
-
-randomFloat :: NativeFn
-randomFloat _ = Right . LoxDbl <$> randomIO
-
-randomChar :: NativeFn
-randomChar _ = Right . LoxString . T.singleton <$> randomIO
+        fields = [(Str (fnName f), LoxFn (qualifyName "Random." f)) | f <- fns]
+        fns = [callable "int" (randomIO :: IO Int)
+              ,callable "float" (randomIO :: IO Double)
+              ,callable "char" (T.singleton <$> randomIO)
+              ,callable "bool" (randomIO :: IO Bool)
+              ,BuiltIn "range" (== 2) randomRange
+              ]
 
 randomRange :: NativeFn
 randomRange [LoxInt a, LoxInt b] = Right . LoxInt <$> randomRIO (a, b)
-randomRange [LoxDbl a, LoxDbl b] = Right . LoxDbl <$> randomRIO (a, b)
-randomRange [LoxInt a, LoxDbl b] = Right . LoxDbl <$> randomRIO (fromIntegral a, b)
-randomRange [LoxDbl a, LoxInt b] = Right . LoxDbl <$> randomRIO (a, fromIntegral b)
-randomRange [LoxString a, LoxString b] = do
+randomRange [LoxNum a, LoxNum b] = Right . LoxDbl <$> randomRIO (a, b)
+randomRange [Txt a,    Txt b] = do
     let a' = T.unpack a
         b' = T.unpack b
     case (a', b') of

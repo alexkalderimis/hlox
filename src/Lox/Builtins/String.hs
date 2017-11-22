@@ -23,7 +23,7 @@ string = emptyClass { className = "String"
                    , staticMethods = HM.fromList statics
                    , protocols = HM.fromList
                                  [ (Gettable, BuiltIn "[]" (== 2) get)
-                                 , (Iterable, BuiltIn "__iter" (== 1) (natively iterator))
+                                 , (Iterable, callable "__iter" iterator)
                                  ]
                    }
 
@@ -33,9 +33,9 @@ statics = []
 stringMethods :: [(VarName, Callable)]
 stringMethods = [(n, BuiltIn ("String::" <> n) a f) | (BuiltIn n a f) <- fns]
     where
-        fns = [ single "upper" (natively T.toUpper)
-              , single "lower" (natively T.toLower)
-              , triple "slice" (toNativeFn slice)
+        fns = [ natively "upper" T.toUpper
+              , natively "lower" T.toLower
+              , callable "slice" slice
               , double "split" split
               ]
         triple n = BuiltIn n (== 3)
