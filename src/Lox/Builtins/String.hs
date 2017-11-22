@@ -2,6 +2,7 @@
 
 module Lox.Builtins.String (string) where
 
+import Control.Exception (throwIO)
 import Data.Monoid
 import Data.Maybe
 import Data.String
@@ -22,7 +23,7 @@ string = emptyClass { className = "String"
                    , staticMethods = HM.fromList statics
                    , protocols = HM.fromList
                                  [ (Gettable, BuiltIn "[]" (== 2) get)
-                                 , (Iterable, BuiltIn "__iter" (== 1) iterator)
+                                 , (Iterable, BuiltIn "__iter" (== 1) (natively iterator))
                                  ]
                    }
 
@@ -32,9 +33,9 @@ statics = []
 stringMethods :: [(VarName, Callable)]
 stringMethods = [(n, BuiltIn ("String::" <> n) a f) | (BuiltIn n a f) <- fns]
     where
-        fns = [ single "upper" uc
-              , single "lower" lc
-              , triple "slice" slice
+        fns = [ single "upper" (natively T.toUpper)
+              , single "lower" (natively T.toLower)
+              , triple "slice" (toNativeFn slice)
               , double "split" split
               ]
         triple n = BuiltIn n (== 3)
@@ -60,33 +61,33 @@ get args = argumentError ["String", "Number"] args
 
 -- iterator takes a read-only snapshot of the array
 -- to avoid issues due to modification.
-iterator :: NativeFn
-iterator [Txt t] = return . Right . LoxIter $ Stepper t iterStr
+iterator :: Text -> LoxVal
+iterator t = LoxIter $ Stepper t iterStr
 
 iterStr :: Text -> LoxResult (Maybe LoxVal, Text)
 iterStr t = return . Right $ case T.uncons t of
               Nothing -> (Nothing, mempty)
               Just (c, t') -> (Just (Txt $ T.singleton c), t')
 
-uc :: NativeFn
-uc [Txt t] = return . Right . Txt $ T.toUpper t
-
-lc :: NativeFn
-lc [Txt t] = return . Right . Txt $ T.toLower t
-
-slice :: NativeFn
-slice [Txt t, Intish i, Intish j]
-  | 0 <= i && j < T.length t = return . Right . Txt . T.take (j - i) $ T.drop i t
-  | otherwise = return . Left . LoxError NativeCode $ "Indices out of bounds"
+slice :: Text -> Int -> Int -> IO Text
+slice t i j
+  | 0 <= i && j < T.length t = return . T.take (j - i) $ T.drop i t
+  | otherwise                = throwIO outofBounds
+  where
+      outofBounds :: LoxException
+      outofBounds = LoxError NativeCode "Indices out of bounds"
 
 split :: NativeFn
 split [Txt t]         = split [Txt t, Txt ""]
 split [Txt t, LoxNil] = split [Txt t, Txt ""]
+
 split [Txt t, Txt ""] -- split into characters
   = Right . LoxArray . AtomArray <$> A.fromList (fmap (Txt . T.singleton) $ T.unpack t)
+
 split [Txt t, Txt t'] -- split on separator
   = Right . LoxArray . AtomArray <$> A.fromList (fmap Txt $ T.splitOn t' t)
-split [Txt t, Intish n] -- split into chunks of size n
+
+split [Txt t, LoxInt n] -- split into chunks of size n
   = Right . LoxArray . AtomArray <$> A.fromList (fmap Txt $ T.chunksOf n t)
 
 run :: LoxT LoxVal -> LoxResult LoxVal

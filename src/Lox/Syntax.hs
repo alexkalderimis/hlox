@@ -17,6 +17,7 @@ module Lox.Syntax where
 
 import Control.Monad.IO.Class
 import Control.Exception.Base (Exception)
+import Control.Exception (try, catch)
 import Data.Bifunctor
 import Data.Fixed
 import Data.HashMap.Strict (HashMap)
@@ -182,6 +183,81 @@ instance Located (Expr' v a) where
 -- Native function that supports errors and IO
 type NativeFn = [LoxVal] -> LoxResult LoxVal
 
+class IsNativeFn f where
+    toNativeFn :: f -> NativeFn
+
+class IsLoxError a where
+    toLoxError :: a -> LoxException
+
+instance IsLoxError LoxException where
+    toLoxError = id
+
+instance IsLoxError Text where
+    toLoxError msg = LoxError Unlocated (T.unpack msg)
+
+class IsLoxVal v where
+    toLoxVal ::  v -> LoxVal
+    fromLoxVal :: LoxVal -> Either LoxException v
+
+natively :: (IsLoxVal v, IsLoxVal r) => (v -> r) -> NativeFn
+natively f = toNativeFn (io . f)
+    where
+        io :: a -> IO a
+        io = return
+
+instance IsLoxVal LoxVal where
+    toLoxVal = id
+    fromLoxVal lv = Right lv
+
+instance IsLoxVal () where
+    toLoxVal () = LoxNil
+    fromLoxVal LoxNil = Right ()
+    fromLoxVal x = Left (TypeError Unlocated "Nil" x) 
+
+instance IsLoxVal Text where
+    toLoxVal t = Txt t
+    fromLoxVal (Txt t) = Right t
+    fromLoxVal x = Left (TypeError Unlocated "String" x)
+
+instance IsLoxVal Int where
+    toLoxVal i = LoxInt i
+    fromLoxVal (LoxInt i) = Right i
+    fromLoxVal x = Left (TypeError Unlocated "Int" x)
+
+instance IsLoxVal Double where
+    toLoxVal n = LoxDbl n
+    fromLoxVal (LoxDbl d) = Right d
+    fromLoxVal (LoxInt i) = Right (fromIntegral i)
+    fromLoxVal x = Left (TypeError Unlocated "Double" x)
+
+instance IsLoxVal Bool where
+    toLoxVal = LoxBool
+    fromLoxVal (LoxBool b) = Right b
+    fromLoxVal x = Left (TypeError Unlocated "Bool" x)
+
+class IsNativeResult r where
+    toNativeResult :: r ->  IO (Either LoxException LoxVal)
+
+instance IsLoxVal v => IsNativeResult (IO v) where
+    toNativeResult io = do r <- try io
+                           return (fmap toLoxVal r)
+
+newtype NatFn = NativeFn { fromNatFn :: [LoxVal] -> LoxResult LoxVal }
+
+instance IsNativeFn NatFn where
+    toNativeFn = fromNatFn
+
+instance (IsNativeFn g, IsLoxVal v) => IsNativeFn (v -> g) where
+    toNativeFn f (a:as) = do a' <- return (fromLoxVal a)
+                             case a' of
+                               Left e -> return . Left $ toLoxError e
+                               Right v -> toNativeFn (f v) as
+
+instance (IsLoxVal v) => IsNativeFn (IO v) where
+    toNativeFn r [] = toNativeResult r
+    toNativeFn _ as = return . Left . LoxError Unlocated
+                        $ "Unexpected arguments: " <> show (fmap typeOf as)
+
 -- functions carry around references to Object and Array
 -- which lets us use literal notation.
 type CoreClasses = (Class, Class)
@@ -279,6 +355,7 @@ data LoxException' a = LoxError SourceLocation String
                   | LoxBreak SourceLocation
                   | LoxContinue SourceLocation
                   | UserError SourceLocation a
+                  | TypeError SourceLocation String a
                   | ArgumentError SourceLocation 
                                   VarName [String] [a]
                   | StackifiedError [StackFrame] (LoxException' a)
