@@ -238,6 +238,7 @@ data LoxVal
 -- helper patterns to avoiding verbose literals
 pattern LoxNil = LoxLit Nil
 pattern LoxNum d <- LoxLit (asDbl -> Just d)
+pattern Intish n <- LoxLit (asInt -> Just n)
 pattern LoxInt i = LoxLit (AInt i)
 pattern LoxDbl i = LoxLit (ADbl i)
 pattern Txt t = LoxLit (Str t)
@@ -250,6 +251,11 @@ asDbl :: Atom -> Maybe Double
 asDbl (ADbl d) = Just d
 asDbl (AInt i) = Just (fromIntegral i)
 asDbl _ = Nothing
+
+asInt :: Atom -> Maybe Int
+asInt (AInt i) = Just i
+asInt (ADbl d) = Just (round d)
+asInt _ = Nothing
 
 instance Default LoxVal where
     def = LoxLit Nil

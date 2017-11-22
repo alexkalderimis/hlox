@@ -13,6 +13,7 @@ import Lox.Syntax
 import qualified Lox.Builtins.Object as O
 import Lox.Interpreter (truthy, apply, bindThis, (<=>))
 import Lox.Interpreter.Types (LoxT, runLoxT, interpreter)
+import qualified Lox.Core.Array as A
 
 string :: Class
 string = emptyClass { className = "String"
@@ -29,25 +30,17 @@ statics :: [(VarName, Callable)]
 statics = []
 
 stringMethods :: [(VarName, Callable)]
-stringMethods = []
-{-
+stringMethods = [(n, BuiltIn ("String::" <> n) a f) | (BuiltIn n a f) <- fns]
     where
-        fns = [ triple "fold" foldArray
-              , double "filter" filterArray
-              , double "map" mapArray
-              , single "reverse" (inPlace A.reverse)
-              , single "sort" inPlaceSort
-              , single "sorted" sortArray
-              , double "push" pushArray
-              , single "pop" popArray
-              , single "size" arraySize
+        fns = [ single "upper" uc
+              , single "lower" lc
+              , triple "slice" slice
+              , double "split" split
               ]
         triple n = BuiltIn n (== 3)
-        double n = BuiltIn n (== 2)
+        double n = BuiltIn n (\n -> n == 2 || n == 1)
         single n = BuiltIn n (== 1)
--}
 
--- worth noting: indexing a Text object is not very efficient.
 get :: NativeFn
 
 get [s, LoxDbl i] = get [s, LoxInt (round i)]
@@ -74,6 +67,27 @@ iterStr :: Text -> LoxResult (Maybe LoxVal, Text)
 iterStr t = return . Right $ case T.uncons t of
               Nothing -> (Nothing, mempty)
               Just (c, t') -> (Just (Txt $ T.singleton c), t')
+
+uc :: NativeFn
+uc [Txt t] = return . Right . Txt $ T.toUpper t
+
+lc :: NativeFn
+lc [Txt t] = return . Right . Txt $ T.toLower t
+
+slice :: NativeFn
+slice [Txt t, Intish i, Intish j]
+  | 0 <= i && j < T.length t = return . Right . Txt . T.take (j - i) $ T.drop i t
+  | otherwise = return . Left . LoxError NativeCode $ "Indices out of bounds"
+
+split :: NativeFn
+split [Txt t]         = split [Txt t, Txt ""]
+split [Txt t, LoxNil] = split [Txt t, Txt ""]
+split [Txt t, Txt ""] -- split into characters
+  = Right . LoxArray . AtomArray <$> A.fromList (fmap (Txt . T.singleton) $ T.unpack t)
+split [Txt t, Txt t'] -- split on separator
+  = Right . LoxArray . AtomArray <$> A.fromList (fmap Txt $ T.splitOn t' t)
+split [Txt t, Intish n] -- split into chunks of size n
+  = Right . LoxArray . AtomArray <$> A.fromList (fmap Txt $ T.chunksOf n t)
 
 run :: LoxT LoxVal -> LoxResult LoxVal
 run lox = interpreter [] mempty >>= runLoxT lox
