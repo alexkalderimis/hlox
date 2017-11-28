@@ -53,8 +53,7 @@ runFile fileName = do
                     let prog = fromParsed p
                     res <- evalLoxT (runProgram prog) s
                     case res of
-                      Left e -> do putStr "[RUNTIME ERROR] "
-                                   putStrLn (pack $ show e)
+                      Left e -> do runtimeError e
                                    exitFailure
                       Right _ -> return ()
 
