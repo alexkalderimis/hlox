@@ -1,5 +1,5 @@
-let limit = 100
-for ( let i = 0 ; i < limit ; i++) {
+let limit = 2048
+for ( let i = 1 ; i < limit ; i = i * 2) {
     print i
     limit = limit / 2
 }
