@@ -1,3 +1,4 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Lox.Builtins.String (string) where
@@ -11,9 +12,11 @@ import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
 
 import Lox.Syntax
-import qualified Lox.Builtins.Object as O
-import Lox.Interpreter (truthy, apply, bindThis, (<=>))
-import Lox.Interpreter.Types (LoxT, runLoxT, interpreter)
+import Lox.Interpreter (bindThis)
+import Lox.Interpreter.Types (
+    NativeFn, LoxException(..), Callable(..), Stepper(..), Class(..), Protocol(..),
+    LoxT, LoxVal(..), pattern LoxNil, pattern LoxInt, pattern LoxDbl, pattern Txt,
+    callable, natively, atomArray, throwLox, unsafeSingleton, emptyClass, argumentError)
 import qualified Lox.Core.Array as A
 
 string :: Class
@@ -47,15 +50,15 @@ get :: NativeFn
 get [s, LoxDbl i] = get [s, LoxInt (round i)]
 
 get [Txt t, LoxInt i] | 0 <= i && i < T.length t =
-    return . Right . Txt . T.take 1 . T.drop i $ t
+    return . Txt . T.take 1 . T.drop i $ t
 
-get [this, LoxString k] = do
+get [this, Txt k] = do
     case HM.lookup k (methods string) of
-      Nothing -> return . Left $ FieldNotFound Unlocated (Str k)
-      Just fn -> run (LoxFn <$> bindThis this fn)
+      Nothing -> throwLox $ FieldNotFound (Str k)
+      Just fn -> LoxFn <$> bindThis this fn
 
 get [_, LoxInt i]
-    = return . Left . LoxError NativeCode $ "character index out of bounds"
+  = throwLox $ LoxError $ "character index out of bounds"
 
 get args = argumentError ["String", "Number"] args
 
@@ -64,32 +67,29 @@ get args = argumentError ["String", "Number"] args
 iterator :: Text -> LoxVal
 iterator t = LoxIter $ Stepper t iterStr
 
-iterStr :: Text -> LoxResult (Maybe LoxVal, Text)
-iterStr t = return . Right $ case T.uncons t of
+iterStr :: Text -> LoxT (Maybe LoxVal, Text)
+iterStr t = return $ case T.uncons t of
               Nothing -> (Nothing, mempty)
               Just (c, t') -> (Just (Txt $ T.singleton c), t')
 
-slice :: Text -> Int -> Int -> IO Text
+slice :: Text -> Int -> Int -> LoxT Text
 slice t i j
   | 0 <= i && j < T.length t = return . T.take (j - i) $ T.drop i t
-  | otherwise                = throwIO outofBounds
+  | otherwise                = throwLox outofBounds
   where
-      outofBounds :: LoxException
-      outofBounds = LoxError NativeCode "Indices out of bounds"
+      outofBounds = LoxError "Indices out of bounds"
 
 split :: NativeFn
 split [Txt t]         = split [Txt t, Txt ""]
 split [Txt t, LoxNil] = split [Txt t, Txt ""]
 
 split [Txt t, Txt ""] -- split into characters
-  = Right . LoxArray . AtomArray <$> A.fromList (fmap (Txt . T.singleton) $ T.unpack t)
+  = atomArray $ fmap (Txt . T.singleton) $ T.unpack t
 
 split [Txt t, Txt t'] -- split on separator
-  = Right . LoxArray . AtomArray <$> A.fromList (fmap Txt $ T.splitOn t' t)
+  = atomArray $ fmap Txt $ T.splitOn t' t
 
 split [Txt t, LoxInt n] -- split into chunks of size n
-  = Right . LoxArray . AtomArray <$> A.fromList (fmap Txt $ T.chunksOf n t)
+  = atomArray $ fmap Txt $ T.chunksOf n t
 
-run :: LoxT LoxVal -> LoxResult LoxVal
-run lox = interpreter [] mempty >>= runLoxT lox
-
+split args = argumentError ["String", "String"] args

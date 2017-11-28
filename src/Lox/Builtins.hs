@@ -4,20 +4,19 @@
 
 module Lox.Builtins (initInterpreter) where
 
-import Control.Exception (try, catch)
 import Control.Concurrent.STM
-import Control.Concurrent (threadDelay)
-import Data.IORef
+import Control.Monad.State.Class
+import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as HM
-import System.IO.Unsafe (unsafePerformIO)
 import System.Clock
+import Data.Monoid ((<>))
 import qualified Data.Vector as V
 import qualified Data.Text as T
 
 import Lox.Syntax
 import Lox.Environment (enterScopeWith)
 import Lox.Interpreter (apply)
-import Lox.Interpreter.Types (LoxT, Interpreter, runLoxT, interpreter)
+import Lox.Interpreter.Types
 import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O
 import qualified Lox.Builtins.Random as R
@@ -43,10 +42,9 @@ builtins :: IO Env
 builtins = enterScopeWith vals mempty
     where vals = classes [A.array, O.baseClass, errorCls, S.string]
                  ++
-                 [("clock", LoxFn (BuiltIn "clock" (== 0) clock))
-                 ,("apply", LoxFn (BuiltIn "apply" (== 2) applyFun))
-                 ,("typeof", LoxFn (BuiltIn "typeof" (== 1) typeofFn))
-                 ,("sleep", LoxFn (BuiltIn "sleep" (== 1) sleep))
+                 [("clock", LoxFn (callable "clock" clock))
+                 ,("apply", LoxFn (callable "apply" applyFun))
+                 ,("typeof", LoxFn (callable "typeof" typeofFn))
                  ]
 
 classes :: [Class] -> [(VarName, LoxVal)]
@@ -57,45 +55,34 @@ errorCls = emptyClass
     { className = "Error"
     , classId = unsafeSingleton ()
     , superClass = Just O.baseClass 
-    , initializer = Just (BuiltIn "Error.init" (== 2) setErrorMsg)
+    , initializer = Just (callable "Error.init" errorInit)
     }
 
-setErrorMsg :: NativeFn
-setErrorMsg [LoxObj Object{..}, msg] = fromSTM $ do
-    modifyTVar' objectFields $ HM.insert (Str "message") msg
-    return LoxNil
+errorInit :: Object -> LoxVal -> LoxT ()
+errorInit Object{..} msg = do
+    frame <- gets stack
+    trc <- errorTrace frame
+    let props = [(Str "message", msg), (Str "stackTrace", trc)]
+    liftIO $ atomically $ modifyTVar' objectFields (<> HM.fromList props)
 
-typeofFn :: NativeFn
-typeofFn [x] = return . Right . LoxString . T.pack $ typeOf x
+typeofFn :: LoxVal -> LoxT T.Text
+typeofFn x = return $! typeOf x
 
-clock :: NativeFn
-clock _ = fmap (Right . LoxDbl . (/ 1e9) . fromInteger . toNanoSecs)
-        $ getTime Realtime
+clock :: IO Double
+clock = fromTime <$> getTime Realtime
+    where fromTime = (/ 1e9) . fromInteger . toNanoSecs
 
-sleep :: NativeFn
-sleep [LoxInt i] = Right LoxNil <$ threadDelay (i * 1000000)
-sleep [LoxDbl i] = Right LoxNil <$ threadDelay (floor $ i * 1e6)
-
-applyFun [LoxFn fn, LoxArray as] = run $ do
+applyFun :: Callable -> AtomArray -> LoxT LoxVal
+applyFun fn as = do
     vs <- readArray as
-    apply Unlocated fn (V.toList vs)
-applyFun args = argumentError ["Function", "Array"] args
+    apply fn (V.toList vs)
 
 maths :: IO Object
 maths = Object O.baseClass <$> newTVarIO (HM.fromList flds)
     where
        flds = 
            [(Str "pi",  LoxDbl pi)
-           ,(Str "sin", LoxFn (BuiltIn "Math.sin" (== 1) (mathsFn sin)))
-           ,(Str "cos", LoxFn (BuiltIn "Math.cos" (== 1) (mathsFn cos)))
-           ,(Str "tan", LoxFn (BuiltIn "Math.tan" (== 1) (mathsFn tan)))
+           ,(Str "sin", LoxFn (natively "Math.sin" (sin :: Double -> Double)))
+           ,(Str "cos", LoxFn (natively "Math.cos" (cos :: Double -> Double)))
+           ,(Str "tan", LoxFn (natively "Math.tan" (tan :: Double -> Double)))
            ]
-       mathsFn f [LoxDbl n] = return (Right . LoxDbl $ f n)
-       mathsFn f [LoxInt n] = mathsFn f [LoxDbl $ fromIntegral n]
-       mathsFn _ args = return (Left $ ArgumentError NativeCode "" ["Number"] args)
-
-run :: LoxT LoxVal -> LoxResult LoxVal
-run lox = interpreter [] mempty >>= runLoxT lox
-
-fromSTM :: STM a -> LoxResult a
-fromSTM stm = try (atomically stm)

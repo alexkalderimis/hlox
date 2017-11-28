@@ -1,31 +1,31 @@
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Lox.Builtins.Thread where
 
-import Data.Monoid
-import System.Random
-import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
-import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent.STM
 import Control.Concurrent
+import Control.Monad.State.Strict (get, liftIO)
 
-import Lox.Syntax hiding (arity)
+import Lox.Syntax (Atom(Str))
 import Lox.Interpreter (apply)
-import Lox.Interpreter.Types (LoxT, runLoxT, interpreter)
-import qualified Lox.Builtins.Object as O
+import Lox.Interpreter.Types (
+    LoxT, LoxVal(LoxFn), Object(..), emptyClass, runLoxT, Callable(..),
+    callable)
 
 object :: IO Object
 object = Object emptyClass <$> newTVarIO (HM.fromList flds)
     where
-        flds = [fn "run" (== 1) runThread
+        flds = [(Str "run", LoxFn $ callable "Thread.run" runThread)
+               ,(Str "sleep", LoxFn $ callable "Thread.sleep" sleep)
                ]
-        fn name arity f = (Str name, LoxFn $ BuiltIn ("Random." <> name) arity f)
 
-runThread :: NativeFn
-runThread [LoxFn fn] = do
-    forkIO (run (apply NativeCode fn []) >> return ())
-    return (Right LoxNil)
+runThread :: Callable -> LoxT ()
+runThread fn = do
+    s <- get
+    _ <- liftIO $ forkIO (runLoxT (apply fn []) s >> return ())
+    return ()
 
-run :: LoxT LoxVal -> LoxResult LoxVal
-run lox = interpreter [] mempty >>= runLoxT lox
+sleep :: Double -> IO ()
+sleep n = threadDelay (floor $ n * 1e6)

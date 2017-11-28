@@ -14,17 +14,17 @@ module Lox.Language (
 import Lox.Scanner (Code, Token(..), Tokens, tokens, tokensFrom)
 import Lox.Optimise (fromParsed)
 import Lox.Syntax (
-    Env, LoxException, LoxException'(..),
     Expr, Expr'(..), Statement, Statement'(..),
-    Program, Parsed, Value, LoxResult,
-    pattern LoxNil, pattern LoxNum, pattern LoxInt, pattern LoxDbl,
-    LoxVal(..), SourceLocation(..), typeOf, range, nil)
+    Parsed,
+    Loc(..), range)
 import Lox.Parser (
     tokenStream, expression, program, ParseError(..), Parser(runParser))
 import Lox.Environment (Environment(..), declare, assign, enterScope, readEnv, boundNames)
 import Lox.Interpreter (
-    eval, run, runProgram, printLox)
+    eval, run, runProgram, printLox, bindThis)
 import Lox.Interpreter.Types (
+    Env, LoxException(..), RuntimeError(..), LoxVal(..), Program, Value, LoxResult, typeOf, nil,
+    pattern LoxNil, pattern LoxNum, pattern LoxInt, pattern LoxDbl,
     LoxT, Interpreter(..), interpreter, runLoxT, evalLoxT)
 
 simpleParse :: Code -> IO (Tokens, Parsed)

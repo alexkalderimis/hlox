@@ -9,19 +9,8 @@ import Data.Generics
 import Lox.Syntax
 
 -- turn a parse tree into something we can interpret
-fromParsed :: Parsed -> Program
-fromParsed = fmap (fmap LoxLit)
-           . simplifyExpr
-
-{- -- lift literals to values
-asValue :: Literal -> LoxVal
-asValue lit = case lit of
-                LitNil      -> LoxNil
-                LitBool b   -> LoxBool b
-                LitInt i    -> LoxInt i
-                LitDbl n    -> LoxDbl n
-                LitString t -> LoxString t
--}
+fromParsed :: Parsed -> Parsed
+fromParsed = simplifyExpr
 
 simplifyExpr :: Parsed -> Parsed
 simplifyExpr = everywhere $ mkT k

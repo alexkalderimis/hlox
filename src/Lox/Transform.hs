@@ -129,9 +129,9 @@ handleExpr (Var loc name) = do
     return (Var loc name')
 
 -- name does not need substitution here as it is for stack traces
-handleExpr (Lambda loc mname args stm) = do
+handleExpr (Fn loc (Lambda mname args stm)) = do
     (args', stm') <- scoped ((,) <$> bindArgs args <*> handleStatement stm)
-    return (Lambda loc mname args' stm')
+    return (Fn loc (Lambda mname args' stm'))
 
 handleExpr e = gmapM f e
     where 

@@ -2,15 +2,14 @@
 
 module Lox.Builtins.Random where
 
-import Data.Monoid
+import Control.Monad.IO.Class
 import System.Random
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
-import System.IO.Unsafe (unsafePerformIO)
 import Control.Concurrent.STM
 
-import Lox.Syntax hiding (arity)
-import qualified Lox.Builtins.Object as O
+import Lox.Syntax
+import Lox.Interpreter.Types
 
 random :: IO Object
 random = Object emptyClass <$> newTVarIO (HM.fromList fields)
@@ -24,11 +23,12 @@ random = Object emptyClass <$> newTVarIO (HM.fromList fields)
               ]
 
 randomRange :: NativeFn
-randomRange [LoxInt a, LoxInt b] = Right . LoxInt <$> randomRIO (a, b)
-randomRange [LoxNum a, LoxNum b] = Right . LoxDbl <$> randomRIO (a, b)
+randomRange [LoxInt a, LoxInt b] = LoxInt <$> liftIO (randomRIO (a, b))
+randomRange [LoxNum a, LoxNum b] = LoxDbl <$> liftIO (randomRIO (a, b))
 randomRange [Txt a,    Txt b] = do
     let a' = T.unpack a
         b' = T.unpack b
     case (a', b') of
-      ([from], [to]) -> Right . LoxString . T.singleton <$> randomRIO (from, to)
-      _ -> return . Left $ LoxError NativeCode "Arguments must be single characters"
+      ([from], [to]) -> Txt . T.singleton <$> liftIO (randomRIO (from, to))
+      _ -> throwLox $ LoxError "Arguments must be single characters"
+randomRange args = argumentError ["Number|String", "Number|String"] args

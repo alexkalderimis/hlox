@@ -116,7 +116,7 @@ assignments' (Binary _ a b) = HS.union <$> assignments a <*> assignments b
 assignments' (IfThenElse _ a b c) = HS.unions <$> mapM assignments [a, b, c]
 assignments' (Call _ a args) = HS.union <$> assignments a
                                         <*> (HS.unions <$> mapM assignments args)
-assignments' (Lambda _ _ (vs, mv) stm) = do
+assignments' (Fn _ (Lambda _ (vs, mv) stm)) = do
     closed <- get
     let bound = (vs >>= patternVars) ++ (maybe [] patternVars mv)
     modify' (<> HS.fromList bound)

@@ -24,21 +24,21 @@ type Method = Method' VarName Atom
 
 data ParserState = ParserState
     { tokens :: !Tokens
-    , location :: !SourceLocation
+    , location :: !Loc
     , breakable :: !Bool
     , returnable :: !Bool
     , inMethod :: !Bool
     } deriving (Show)
 
-data ParseError = Fatal !SourceLocation !Text
-                | Recoverable !SourceLocation !Text
+data ParseError = Fatal !Loc !Text
+                | Recoverable !Loc !Text
                 | NoParse
                 deriving (Show, Eq)
 
 tokenStream :: FilePath -> Tokens -> ParserState
 tokenStream fp ts = ParserState
     { tokens = ts
-    , location = SourceLocation (pack fp) 0 0
+    , location = Loc (pack fp) 0 0
     , breakable = False
     , returnable = False
     , inMethod = False
@@ -466,7 +466,7 @@ fnExpr = do
     args <- arguments
     body <- functionBody EQUAL_GT
     end <- loc
-    return (Lambda (span start end) Nothing args body)
+    return (Fn (span start end) (Lambda Nothing args body))
 
 atom :: Parser Expr
 atom = ident
@@ -543,11 +543,11 @@ next :: Parser Token
 next = Parser $ \s -> case tokens s of
     []             -> (Left (Fatal (location s) "EOF"), s)
     ((l, c, t):ts) -> (Right t, s { tokens = ts
-                                  , location = SourceLocation (fileName s) l c
+                                  , location = Loc (fileName s) l c
                                   })
 
 fileName :: ParserState -> Text
-fileName s = let (SourceLocation t _ _) = location s
+fileName s = let (Loc t _ _) = location s
               in t
 
 skipWhile :: (Token -> Bool) -> Parser ()
@@ -575,7 +575,7 @@ match f = p <|> backtrack "Failed match"
 is :: (ParserState -> a) -> Parser a
 is f = Parser $ \s -> (Right (f s), s)
 
-loc :: Parser SourceLocation
+loc :: Parser Loc
 loc = is location
 
 thisAllowed :: Parser a -> Parser a
@@ -613,5 +613,5 @@ breaking pa = do
 tracePeek :: String -> Parser ()
 tracePeek mgs = Parser $ \s -> traceShow (mgs, listToMaybe $ tokens s) (Right (), s)
 
-span :: SourceLocation -> SourceLocation -> SourceLocation
+span :: Loc -> Loc -> Loc
 span a b = simplify (a :..: b)

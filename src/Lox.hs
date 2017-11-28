@@ -176,24 +176,36 @@ parseError e = case e of
                        in if l == r then point a b c
                                     else point a b c <> " - " <> point d e f
 
-runtimeError :: LoxException -> IO ()
-runtimeError LoxBreak{} = return ()
-runtimeError LoxContinue{} = return ()
-runtimeError LoxReturn{} = return ()
-runtimeError (ArgumentError loc n types args) = do
-     putStr "[ARGUMENT ERROR] "
-     putStr $ niceLoc loc
-     putStr $ " | " <> n <> " expected (" <> intercalate ", " (fmap pack types) <> ")"
-     putStrLn $ " but got (" <> intercalate ", " (fmap (pack . typeOf) args) <> ")"
-runtimeError (StackifiedError fs e) = do
-    runtimeError e
-    putStr "In: "
-    forM_ fs $ \(name, loc) -> do
-        putStrLn $ " > " <> name <> " " <> niceLoc loc
-runtimeError e = do putStr "[RUNTIME ERROR] "
-                    putStrLn (pack $ show e)
+runtimeError :: RuntimeError -> IO ()
+runtimeError (RuntimeError ts e) = printError e >> printTrace ts
+    where
+        printError (LoxError msg) = putStrLn $ "[INTERNAL ERROR] " <> msg
+        printError (FieldNotFound k) = putStrLn $ "[FIELD NOT FOUND] " <> pack (show k)
+        printError (UserError val) = putStrLn $ "[ERROR] " <> pack (show val)
+        printError (TypeError ty val) = do
+            putStr "[TYPE ERROR]"
+            putStr $ " expected " <> ty
+            putStr $ " but got " <> pack (show val) <> " :: " <> typeOf val
+            putStrLn ""
+        printError (ArgumentError n types args) = do
+            putStr "[ARGUMENT ERROR]"
+            putStr $ " in " <> n <> " expected (" <> intercalate ", " (fmap pack types) <> ")"
+            putStrLn $ " but got (" <> intercalate ", " (fmap typeOf args) <> ")"
+        printError (CaughtEx ex) = do
+            putStr "[INTERNAL ERROR] "
+            putStr . pack $ show ex
+            putStrLn ""
 
-niceLoc :: SourceLocation -> Text
+        printTrace [] = return ()
+        printTrace ((was,wo):frames) = do
+            putStr "  in "
+            putStr was
+            putStr " at "
+            putStr $ niceLoc wo
+            putStrLn ""
+            printTrace frames
+
+niceLoc :: Loc -> Text
 niceLoc loc = case range loc of
     (l, r) | l == r -> place l
     (l, r) -> place l <> " - " <> place r
