@@ -51,7 +51,7 @@ import Lox.Environment (resolve, deref, enterScopeWith)
 -- * exception handing
 -- Rather than using a stack of transformers, we unroll the stack here manually,
 -- because this exercise is all about explicitness.
-newtype LoxT a = LoxT (Interpreter -> IO (a, Interpreter))
+newtype LoxM a = LoxM (Interpreter -> IO (a, Interpreter))
 type Env = Environment VarName LoxVal
 
 type Program = [Statement]
@@ -62,68 +62,68 @@ newtype Singleton = Singleton (IORef ())
 instance Show Singleton where
     show _ = "<id>"
 
-instance Functor LoxT where
-    fmap f (LoxT lox) = LoxT $ \s -> do (ret, s') <- lox $! s
+instance Functor LoxM where
+    fmap f (LoxM lox) = LoxM $ \s -> do (ret, s') <- lox $! s
                                         let ret' = f ret
                                         ret' `seq` return (ret', s')
 
-instance Applicative LoxT where
-    pure a = LoxT $ \s -> return (a, s)
-    (LoxT a) <*> (LoxT b) = LoxT $ \s -> do
+instance Applicative LoxM where
+    pure a = LoxM $ \s -> return (a, s)
+    (LoxM a) <*> (LoxM b) = LoxM $ \s -> do
         (f, s') <- a s
         (x, s'') <- b s'
         return (f $! x, s'')
 
-instance Monad LoxT where
-    (LoxT lox) >>= f = LoxT $ \s -> do
+instance Monad LoxM where
+    (LoxM lox) >>= f = LoxM $ \s -> do
         (x, s') <- lox $! s
-        let (LoxT lox') = f x
+        let (LoxM lox') = f x
         lox' $! s'
 
-instance MonadState Interpreter LoxT where
-    state f = LoxT $ \i -> return (f $! i)
+instance MonadState Interpreter LoxM where
+    state f = LoxM $ \i -> return (f $! i)
 
 -- the errors we ca catch
-instance MonadError RuntimeError LoxT where
-    throwError e = LoxT $ \_ -> throwIO e
-    catchError (LoxT action) handler = LoxT $ \s -> do
+instance MonadError RuntimeError LoxM where
+    throwError e = LoxM $ \_ -> throwIO e
+    catchError (LoxM action) handler = LoxM $ \s -> do
         mret <- try (action $! s)
         case mret of
           Right r -> return r
-          Left e -> let (LoxT cont) = handler e in cont $! s
+          Left e -> let (LoxM cont) = handler e in cont $! s
 
-throwLox :: LoxException -> LoxT a
-throwLox e = LoxT $ \s -> throwIO $ RuntimeError (stack s) e
+throwLox :: LoxException -> LoxM a
+throwLox e = LoxM $ \s -> throwIO $ RuntimeError (stack s) e
 
-loxError :: Text -> LoxT a
+loxError :: Text -> LoxM a
 loxError = throwLox . LoxError
 
-throwLoop :: LoopControl -> LoxT a
-throwLoop e = LoxT $ \_ -> throwIO e
+throwLoop :: LoopControl -> LoxM a
+throwLoop e = LoxM $ \_ -> throwIO e
 
-tryLoop :: LoxT a -> LoxT (Either LoopControl a)
-tryLoop (LoxT f) = LoxT $ \s -> do
+tryLoop :: LoxM a -> LoxM (Either LoopControl a)
+tryLoop (LoxM f) = LoxM $ \s -> do
     ret <- try (f s)
     case ret of
       Left e -> return (Left e, s)
       Right (r, s') -> return (Right r, s')
 
 -- run a loop and return whether the loop body broke
-runLoop :: LoxT a -> LoxT Bool
+runLoop :: LoxM a -> LoxM Bool
 runLoop = fmap (either (== LoxBreak) (const False)) . tryLoop
 
-returnVal :: LoxVal -> LoxT a
-returnVal val = LoxT $ \s -> throwIO (LoxReturn val s)
+returnVal :: LoxVal -> LoxM a
+returnVal val = LoxM $ \s -> throwIO (LoxReturn val s)
 
-returning :: LoxT a -> LoxT LoxVal
-returning (LoxT f) = LoxT $ \s -> do
+returning :: LoxM a -> LoxM LoxVal
+returning (LoxM f) = LoxM $ \s -> do
     ret <- try (f s)
     case ret of
       Left (LoxReturn val s') -> return (val, s')
       Right (_, s') -> return (LoxNil, s')
 
-instance MonadIO LoxT where
-    liftIO io = LoxT $ \s -> do
+instance MonadIO LoxM where
+    liftIO io = LoxM $ \s -> do
         ret <- fmap Right io `catches` handlers
         case ret of
           Left e -> throwIO (RuntimeError (stack s) e)
@@ -136,11 +136,11 @@ instance MonadIO LoxT where
             handle :: (Exception e) => e -> IO (Either LoxException a)
             handle e = return . Left . CaughtEx $ toException e
 
-runLoxT :: LoxT a -> Interpreter -> LoxResult a
-runLoxT (LoxT f) s = try (fst <$> f s)
+runLox :: LoxM a -> Interpreter -> LoxResult a
+runLox (LoxM f) s = try (fst <$> f s)
 
-evalLoxT :: LoxT a -> Interpreter -> LoxResult (a, Interpreter)
-evalLoxT lox s = runLoxT ((,) <$> lox <*> get) s
+evalLox :: LoxM a -> Interpreter -> LoxResult (a, Interpreter)
+evalLox lox s = runLox ((,) <$> lox <*> get) s
 
 type Modules = IORef (HM.HashMap ModuleIdentifier LoxModule)
 
@@ -283,7 +283,7 @@ data LoopControl = LoxContinue | LoxBreak
     deriving (Show, Eq, Data, Typeable)
 instance Exception LoopControl
 
-data Stepper = forall a. Stepper a (a -> LoxT (Maybe LoxVal, a))
+data Stepper = forall a. Stepper a (a -> LoxM (Maybe LoxVal, a))
 
 instance Show Stepper where
     show _ = "Iterator"
@@ -299,7 +299,7 @@ data Callable = BuiltIn VarName (Int -> Bool) NativeFn
               | Closure (Lambda VarName Atom) Interpreter
 
 -- Native function that supports errors and IO
-type NativeFn = [LoxVal] -> LoxT LoxVal
+type NativeFn = [LoxVal] -> LoxM LoxVal
 
 class HasArity f where
     getArity :: (Proxy f) -> Int
@@ -310,7 +310,7 @@ instance IsLoxVal v => HasArity (IO v) where
 instance HasArity LoxVal where
     getArity _ = 0
 
-instance HasArity (LoxT a) where
+instance HasArity (LoxM a) where
     getArity _ = 0
 
 instance HasArity r => HasArity (v -> r) where
@@ -404,7 +404,7 @@ instance IsLoxVal v => IsNativeResult (IO v) where
     toNativeResult io = do r <- try io
                            return (fmap toLoxVal r)
 
-newtype NatFn = NativeFn { fromNatFn :: [LoxVal] -> LoxT LoxVal }
+newtype NatFn = NativeFn { fromNatFn :: [LoxVal] -> LoxM LoxVal }
 
 instance IsNativeFn NatFn where
     toNativeFn = fromNatFn
@@ -421,7 +421,7 @@ instance (IsLoxVal v) => IsNativeFn (IO v) where
                         $ "Unexpected arguments: "
                         : L.intersperse ", " (fmap typeOf as)
 
-instance (IsLoxVal v) => IsNativeFn (LoxT v) where
+instance (IsLoxVal v) => IsNativeFn (LoxM v) where
     toNativeFn lox [] = fmap toLoxVal lox
     toNativeFn _ as = throwLox . LoxError . mconcat
                         $ "Unexpected arguments: "
@@ -495,15 +495,15 @@ instance Show Object where
 instance Eq Class where
     a == b = classId a == classId b
 
-new :: Class -> [(Atom, LoxVal)] -> LoxT Object
-new cls flds = LoxT $ \s -> do
+new :: Class -> [(Atom, LoxVal)] -> LoxM Object
+new cls flds = LoxM $ \s -> do
     o <- Object cls <$> newTVarIO (HM.fromList flds)
     return (o, s)
 
 arrayFromList :: (Monad m, MonadIO m) => [LoxVal] -> m AtomArray
 arrayFromList xs = AtomArray <$> (liftIO $  A.fromList xs)
 
-atomArray :: [LoxVal] -> LoxT LoxVal
+atomArray :: [LoxVal] -> LoxM LoxVal
 atomArray = fmap LoxArray . arrayFromList
 
 nil :: LoxVal -> Bool
@@ -533,7 +533,7 @@ unsafeSingleton :: () -> Singleton
 unsafeSingleton = unsafePerformIO . fmap Singleton . newIORef
 
 -- for use in native modules
-argumentError :: [String] -> [LoxVal] -> LoxT LoxVal
+argumentError :: [String] -> [LoxVal] -> LoxM LoxVal
 argumentError types = throwLox . ArgumentError "" types
 
 envToFields :: Env -> IO (TVar (HM.HashMap Atom LoxVal))
@@ -541,16 +541,16 @@ envToFields env = do
     bindings <- HM.toList <$> readEnv env
     newTVarIO (HM.fromList $ fmap (first Str) bindings)
 
-putEnv :: Env -> LoxT ()
+putEnv :: Env -> LoxM ()
 putEnv env = modify' $ \s -> s { bindings = env }
 
 -- returns (old, new)
-modEnv :: (Env -> Env) -> LoxT (Env, Env)
+modEnv :: (Env -> Env) -> LoxM (Env, Env)
 modEnv f = do old <- gets bindings
               let env = f old
               (old, env) <$ putEnv env
 
-runtimeToLoxVal :: RuntimeError -> LoxT Object
+runtimeToLoxVal :: RuntimeError -> LoxM Object
 runtimeToLoxVal e = do
     trace <- errorTrace (stackTrace e)
     env <- gets baseEnv
@@ -570,7 +570,7 @@ runtimeToLoxVal e = do
       CaughtEx err -> do ec <- cls "InternalError"
                          new ec [trc, ("message", Txt (T.pack $ show err))]
 
-errorTrace :: [StackFrame] -> LoxT LoxVal
+errorTrace :: [StackFrame] -> LoxM LoxVal
 errorTrace frames = do
     env <- gets baseEnv
     trcCls <- liftIO (coreClass "Trace" env) >>= either throwLox return

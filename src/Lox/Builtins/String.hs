@@ -15,7 +15,7 @@ import Lox.Syntax
 import Lox.Interpreter (bindThis)
 import Lox.Interpreter.Types (
     NativeFn, LoxException(..), Callable(..), Stepper(..), Class(..), Protocol(..),
-    LoxT, LoxVal(..), pattern LoxNil, pattern LoxInt, pattern LoxDbl, pattern Txt,
+    LoxVal(..), pattern LoxNil, pattern LoxInt, pattern LoxDbl, pattern Txt,
     callable, natively, atomArray, throwLox, unsafeSingleton, emptyClass, argumentError)
 import qualified Lox.Core.Array as A
 
@@ -67,15 +67,15 @@ get args = argumentError ["String", "Number"] args
 iterator :: Text -> LoxVal
 iterator t = LoxIter $ Stepper t iterStr
 
-iterStr :: Text -> LoxT (Maybe LoxVal, Text)
+iterStr :: Monad m => Text -> m (Maybe LoxVal, Text)
 iterStr t = return $ case T.uncons t of
               Nothing -> (Nothing, mempty)
               Just (c, t') -> (Just (Txt $ T.singleton c), t')
 
-slice :: Text -> Int -> Int -> LoxT Text
+slice :: Text -> Int -> Int -> IO Text
 slice t i j
   | 0 <= i && j < T.length t = return . T.take (j - i) $ T.drop i t
-  | otherwise                = throwLox outofBounds
+  | otherwise                = throwIO outofBounds
   where
       outofBounds = LoxError "Indices out of bounds"
 

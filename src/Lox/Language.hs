@@ -25,7 +25,7 @@ import Lox.Interpreter (
 import Lox.Interpreter.Types (
     Env, LoxException(..), RuntimeError(..), LoxVal(..), Program, Value, LoxResult, typeOf, nil,
     pattern LoxNil, pattern LoxNum, pattern LoxInt, pattern LoxDbl,
-    LoxT, Interpreter(..), interpreter, runLoxT, evalLoxT)
+    LoxM, Interpreter(..), interpreter, runLox, evalLox)
 
 simpleParse :: Code -> IO (Tokens, Parsed)
 simpleParse code = do

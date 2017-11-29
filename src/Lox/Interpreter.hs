@@ -50,7 +50,7 @@ import Lox.Environment (
     enterScope, enterScopeWith, inCurrentScope)
 import Lox.Interpreter.Types
 
-type BinaryFn = (LoxVal -> LoxVal -> LoxT LoxVal)
+type BinaryFn = (LoxVal -> LoxVal -> LoxM LoxVal)
 
 class Monad m => MonadLox m where
     printLox :: LoxVal -> m ()
@@ -58,21 +58,21 @@ class Monad m => MonadLox m where
 instance MonadLox IO where
     printLox a = do
         i <- interpreter mempty mempty
-        runLoxT (stringify a) i >>= either (error . show) T.putStrLn
+        runLox (stringify a) i >>= either (error . show) T.putStrLn
 
-instance MonadLox LoxT where
+instance MonadLox LoxM where
     printLox a = do
         s <- stringify a
         liftIO (T.putStrLn s)
 
 run :: Env -> Program -> IO Value
-run env program = interpreter [] env >>= runLoxT (runProgram program)
+run env program = interpreter [] env >>= runLox (runProgram program)
 
-runProgram :: Program -> LoxT LoxVal
+runProgram :: Program -> LoxM LoxVal
 runProgram = foldM run def
     where run _ = exec
 
-withStack :: (Described a, Located a) => (a -> LoxT LoxVal) -> a -> LoxT LoxVal
+withStack :: (Described a, Located a) => (a -> LoxM LoxVal) -> a -> LoxM LoxVal
 withStack f a = do
     let frame = stackFrame a
     stck <- gets stack
@@ -82,10 +82,10 @@ withStack f a = do
     return r
 
 -- stack frame capturing machinery
-exec :: Statement -> LoxT LoxVal
+exec :: Statement -> LoxM LoxVal
 exec = withStack exec'
 
-eval :: Expr -> LoxT LoxVal
+eval :: Expr -> LoxM LoxVal
 eval = withStack eval'
 
 exec' (Import loc mod mp) = do
@@ -160,7 +160,7 @@ exec' (ClassDecl _ name _ msuper methods) = do
     return cls
 
     where
-        findSuperClass :: Env -> VarName -> LoxT Class
+        findSuperClass :: Env -> VarName -> LoxM Class
         findSuperClass env name = do
             ma <- join <$> traverse (liftIO . deref) (resolve name env)
             case ma of
@@ -212,7 +212,7 @@ exec' (ForLoop loc minit mcond mpost body) =
         comp LessThanEq = (<=)
         -- the optimised loop prevents most loop bookkeeping - preventing
         -- lookups of the loop var and function application of the post-cond.
-        optimisedLoop :: forall a. Num a => (a -> Atom) -> a -> a -> VarName -> (Atom -> Atom -> Bool) -> Expr -> LoxT LoxVal
+        optimisedLoop :: forall a. Num a => (a -> Atom) -> a -> a -> VarName -> (Atom -> Atom -> Bool) -> Expr -> LoxM LoxVal
         optimisedLoop con i step var comp' limit = do
             old <- gets bindings
             env <- liftIO (declare var old)
@@ -221,21 +221,21 @@ exec' (ForLoop loc minit mcond mpost body) =
             putEnv env *> whileLoop con ref comp' limit i step <* putEnv old
             return LoxNil
 
-        whileLoop :: forall a. Num a => (a -> Atom) -> Ref LoxVal -> (Atom -> Atom -> Bool) -> Expr -> a -> a -> LoxT ()
-        whileLoop con ref comp' limit curr step = (go :: a -> LoxT ()) curr
+        whileLoop :: forall a. Num a => (a -> Atom) -> Ref LoxVal -> (Atom -> Atom -> Bool) -> Expr -> a -> a -> LoxM ()
+        whileLoop con ref comp' limit curr step = (go :: a -> LoxM ()) curr
             where
               go i = do
                 p <- compareLimit (comp' (con i)) limit
                 when p $ do broke <- runLoop (setRef con ref i >> exec body)
                             unless broke $ go (i + step)
 
-        compareLimit :: (Atom -> Bool) -> Expr -> LoxT Bool
+        compareLimit :: (Atom -> Bool) -> Expr -> LoxM Bool
         compareLimit f limit = do lim <- eval limit
                                   case lim of
                                     (LoxLit x) -> return $ f x
                                     _        -> return False
 
-        setRef :: forall a. (a -> Atom) -> Ref LoxVal -> a -> LoxT ()
+        setRef :: forall a. (a -> Atom) -> Ref LoxVal -> a -> LoxM ()
         setRef con ref i = liftIO (writeRef ref (LoxLit $ con i))
 
         asWhile = {-# SCC "exec-for-loop-with-while" #-}
@@ -270,7 +270,7 @@ exec' (Iterator _ p e body) = do
                   if broke then return LoxNil
                            else loop env a' next
 
-handleWith :: [(VarName, Statement)] -> RuntimeError -> LoxT LoxVal
+handleWith :: [(VarName, Statement)] -> RuntimeError -> LoxM LoxVal
 handleWith [] e = throwError e
 handleWith (h:hs) e = do
     let (var, stm) = h
@@ -281,7 +281,7 @@ handleWith (h:hs) e = do
     (exec stm >> LoxNil <$ cleanup)
         `catchError` (\e -> cleanup >> handleWith hs e)
 
-iterable :: LoxVal -> LoxT Stepper
+iterable :: LoxVal -> LoxM Stepper
 iterable a = do
     fn <- lookupProtocol Iterable a
           >>= maybe (loxError $ "Cannot iterate over " <> typeOf a) return
@@ -290,7 +290,7 @@ iterable a = do
       (LoxIter it) -> return it
       wrong -> loxError $ "Iterator must return iterable, got " <> typeOf wrong
 
-eval' :: Expr -> LoxT LoxVal
+eval' :: Expr -> LoxM LoxVal
 
 eval' (Fn _ lambda) = LoxFn . Closure lambda <$> get
 
@@ -477,7 +477,7 @@ eval' (Mapping loc pairs) = do
     obj <- new cls vals
     return (LoxObj obj)
 
-init :: Object -> [LoxVal] -> LoxT ()
+init :: Object -> [LoxVal] -> LoxM ()
 init obj args = construct obj args
     where
         construct = case initializer (objectClass obj) of
@@ -490,7 +490,7 @@ init obj args = construct obj args
         wrongArity = loxError $ "Wrong number of arguments to constructor. Expected 0, got "
                               <> T.pack (show (length args))
 
-lookupProtocol :: Protocol -> LoxVal -> LoxT (Maybe Callable)
+lookupProtocol :: Protocol -> LoxVal -> LoxM (Maybe Callable)
 lookupProtocol p a = do
     mcls <- classOf a
     case mcls of
@@ -501,7 +501,7 @@ lookupProtocol p a = do
                               Nothing -> superClass cls >>= classProtocol
                               Just fn -> return fn
 
-classOf :: LoxVal -> LoxT (Maybe Class)
+classOf :: LoxVal -> LoxM (Maybe Class)
 classOf x = case x of
   (LoxString _) -> Just <$> knownClass "String"
   (LoxArray _) -> Just <$> knownClass "Array"
@@ -509,7 +509,7 @@ classOf x = case x of
   _ -> return Nothing
 
 -- get a class we know to exist, from the base-environment
-knownClass :: VarName -> LoxT Class
+knownClass :: VarName -> LoxM Class
 knownClass n = do
     env <- gets baseEnv
     mc <- liftIO $ join <$> traverse deref (resolve n env)
@@ -518,20 +518,20 @@ knownClass n = do
         Nothing -> loxError $ "Illegal state - " <> n <> " not defined"
         Just x  -> loxError $ "Illegal state - " <> n <> " defined as " <> typeOf x
   
-instantiate :: Class -> [LoxVal] -> LoxT LoxVal
+instantiate :: Class -> [LoxVal] -> LoxM LoxVal
 instantiate cls args = do
     obj <- new cls mempty
     initialise (init obj args)
     return $! LoxObj obj
 
-bindThis :: LoxVal -> Callable -> LoxT Callable
+bindThis :: LoxVal -> Callable -> LoxM Callable
 bindThis this (BuiltIn n ar fn)
   = return $ BuiltIn n (\n -> ar (n + 1)) (\args -> fn (this : args))
 bindThis this (Closure lam s)
   = do env <- liftIO (enterScopeWith [("this", this)] (bindings s))
        return $ Closure lam s { bindings = env }
 
-apply :: Callable -> [LoxVal] -> LoxT LoxVal
+apply :: Callable -> [LoxVal] -> LoxM LoxVal
 apply fn args = do
     loc <- gets (maybe Unlocated snd . listToMaybe . stack)
     let frame = (fnName fn, loc)
@@ -540,7 +540,7 @@ apply fn args = do
     modify' $ \s -> s { stack = drop 1 (stack s) }
     return r
 
-apply' :: Callable -> [LoxVal] -> LoxT LoxVal
+apply' :: Callable -> [LoxVal] -> LoxM LoxVal
 apply' fn args | not (arity fn (length args)) = loxError "Wrong number of arguments"
 
 apply' (BuiltIn _ _ fn) args = fn args
@@ -576,7 +576,7 @@ addAtoms (LoxString a) b = do s <- stringify b
                               return $ LoxString (a <> s)
 addAtoms a b = fromSTM (addSTM a b)
 
-fromSTM :: STM a -> LoxT a
+fromSTM :: STM a -> LoxM a
 fromSTM stm = do
     r <- liftIO $ (Right <$> atomically stm) `catch` (return . Left)
     either throwError return r
@@ -597,7 +597,7 @@ numericalFn name _ _ a b = loxError $ mconcat [ "Cannot apply operator: "
                                               , typeOf a, " ", name, " ", typeOf b
                                               ]
 
-stringify :: LoxVal -> LoxT Text
+stringify :: LoxVal -> LoxM Text
 stringify LoxNil      = return "nil"
 stringify (Txt t)     = return t
 stringify (LoxBool b) = return . T.pack $ fmap toLower (show b)
@@ -621,7 +621,7 @@ stringify (LoxArray arr) = do
     es <- V.toList <$> mapM quoteString vs
     return $ mconcat $ [ "[" ] ++ L.intersperse ", " es ++ [ "]" ]
 
-quoteString :: LoxVal -> LoxT Text
+quoteString :: LoxVal -> LoxM Text
 quoteString (Txt t) = return ("\"" <> t <> "\"")
 quoteString a = stringify a
 
@@ -650,13 +650,13 @@ binaryFns = HM.fromList
                                                           , typeOf b
                                                           ]
 
-(===) :: LoxVal -> LoxVal -> LoxT Bool
+(===) :: LoxVal -> LoxVal -> LoxM Bool
 (LoxObj a)   === (LoxObj b)   = return (a == b)
 (LoxLit a)   === (LoxLit b)   = return (a == b)
 (LoxClass a) === (LoxClass b) = return (a == b)
 a            === b            = fmap (== Just EQ) (a <=> b)
 
-(<=>) :: LoxVal -> LoxVal -> LoxT (Maybe Ordering)
+(<=>) :: LoxVal -> LoxVal -> LoxM (Maybe Ordering)
 (LoxLit a)                <=> (LoxLit b) = return $ Just (a `compare` b)
 (LoxArray (AtomArray a))  <=> (LoxArray (AtomArray b))  = do
     as <- liftIO $ A.readArray a
@@ -666,7 +666,7 @@ a            === b            = fmap (== Just EQ) (a <=> b)
            $ V.find (/= Just EQ) ords
 a <=> b = return Nothing
 
-initialise :: LoxT a -> LoxT a
+initialise :: LoxM a -> LoxM a
 initialise lox = do
     initing <- gets initialising
     modify' $ \s -> s { initialising = True }
@@ -677,7 +677,7 @@ initialise lox = do
 notAssignedIn :: VarName -> Statement -> Bool
 notAssignedIn var stm = not (var `isAssignedIn` stm)
 
-getModule :: ModuleIdentifier -> LoxT Object
+getModule :: ModuleIdentifier -> LoxM Object
 getModule mod = do
     mods <- gets modules
     x <- HM.lookup mod <$> liftIO (readIORef mods)
@@ -693,7 +693,7 @@ getModule mod = do
         unblock ref e = do liftIO (modifyIORef' ref (HM.delete mod))
                            throwError e
 
-loadModule :: ModuleIdentifier -> LoxT Object
+loadModule :: ModuleIdentifier -> LoxM Object
 loadModule m = do
     s <- get
     fn <- moduleToFileName m
@@ -716,20 +716,20 @@ loadModule m = do
 showModId :: ModuleIdentifier -> Text
 showModId = mconcat . L.intersperse "." . unModuleIdentifier
 
-moduleToFileName :: ModuleIdentifier -> LoxT FilePath
+moduleToFileName :: ModuleIdentifier -> LoxM FilePath
 moduleToFileName (ModuleIdentifier parts) =
     return $ joinPath (map T.unpack parts) <.> "lox"
 
-declareAndBind :: Pattern VarName -> LoxVal -> LoxT LoxVal
+declareAndBind :: Pattern VarName -> LoxVal -> LoxM LoxVal
 declareAndBind p val = do
     mapM_ declareVar (patternVars p)
     bindPattern p val
     return val
 
-declareVar :: VarName -> LoxT ()
+declareVar :: VarName -> LoxM ()
 declareVar v = gets bindings >>= (liftIO . declare v) >>= putEnv
 
-bindPattern :: Pattern VarName -> LoxVal -> LoxT ()
+bindPattern :: Pattern VarName -> LoxVal -> LoxM ()
 bindPattern Ignore _ = return ()
 bindPattern (Name v) x = gets bindings >>= liftIO . assign v x >> return ()
 -- destructure objects (more precisely, gettable things)

@@ -51,7 +51,7 @@ runFile fileName = do
                     exitFailure
       Right p -> do s <- initInterpreter
                     let prog = fromParsed p
-                    res <- evalLoxT (runProgram prog) s
+                    res <- evalLox (runProgram prog) s
                     case res of
                       Left e -> do runtimeError e
                                    exitFailure
@@ -134,8 +134,8 @@ run' i ReplOpts{..} intS code = do
                         putStrLn "==== PROG"
                         print prog
                     when showResult $ putStrLn "=== OUTPUT"
-                    res <- evalLoxT lox
-                                    (intS { bindings = enterScope (bindings intS) })
+                    res <- evalLox lox
+                                   (intS { bindings = enterScope (bindings intS) })
                     case res of
                       Left e -> do runtimeError e
                                    return intS

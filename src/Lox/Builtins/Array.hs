@@ -18,7 +18,7 @@ import qualified Lox.Core.Array as A
 import Lox.Interpreter (apply, bindThis, (<=>))
 import Lox.Interpreter.Types (
     NativeFn, Stepper(..), LoxException(..), LoxVal(..), Callable(..),
-    Class(..), Protocol(..), unsafeSingleton, emptyClass, AtomArray(..), LoxT,
+    Class(..), Protocol(..), unsafeSingleton, emptyClass, AtomArray(..), LoxM,
     pattern LoxInt, pattern LoxNum, pattern LoxDbl, pattern Txt, pattern LoxNil,
     truthy, callable, toNativeFn, readArray, throwLox)
 
@@ -51,7 +51,7 @@ arrayMethods = [(n, BuiltIn ("Array::" <> n) a f) | (BuiltIn n a f) <- fns]
               , callable "size" arraySize
               ]
 
-getElement :: AtomArray -> LoxVal -> LoxT LoxVal
+getElement :: AtomArray -> LoxVal -> LoxM LoxVal
 getElement xs@(AtomArray arr) = go
     where
         go (LoxDbl d) = go (LoxInt $ round d)
@@ -91,18 +91,18 @@ inclusiveRange (LoxInt from) (LoxInt to)
   = throwIO . LoxError
   $ "Expected (A, B) where B >= A, got " <> T.pack (show from) <> " and " <> T.pack (show to)
 
-foldArray :: AtomArray -> LoxVal -> Callable -> LoxT LoxVal
+foldArray :: AtomArray -> LoxVal -> Callable -> LoxM LoxVal
 foldArray (AtomArray arr) acc fn =
     let f m a = apply fn [m, a]
      in A.foldl f acc arr
 
-filterArray :: AtomArray -> Callable -> LoxT AtomArray
+filterArray :: AtomArray -> Callable -> LoxM AtomArray
 filterArray (AtomArray arr) fn = AtomArray <$> A.filter (fmap truthy . apply fn . return) arr
 
-mapArray :: AtomArray -> Callable -> LoxT AtomArray
+mapArray :: AtomArray -> Callable -> LoxM AtomArray
 mapArray (AtomArray arr) fn = AtomArray <$> A.map (apply fn . return) arr
 
-sortArray :: AtomArray -> LoxT AtomArray
+sortArray :: AtomArray -> LoxM AtomArray
 sortArray (AtomArray arr) = AtomArray <$> A.sorted cmp arr
 
 pushArray :: AtomArray -> LoxVal -> IO ()
@@ -115,5 +115,5 @@ arraySize :: AtomArray -> IO Int
 arraySize (AtomArray arr) = A.size arr
 
 -- transform 4-valued Lox comparisons to 3-valued HS ones.
-cmp :: LoxVal -> LoxVal -> LoxT Ordering
+cmp :: LoxVal -> LoxVal -> LoxM Ordering
 cmp a b = fmap (fromMaybe LT) (a <=> b)

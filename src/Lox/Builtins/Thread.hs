@@ -12,7 +12,7 @@ import Control.Monad.State.Strict (get, liftIO)
 import Lox.Syntax (Atom(Str))
 import Lox.Interpreter (apply)
 import Lox.Interpreter.Types (
-    LoxT, LoxVal(LoxFn), Object(..), emptyClass, runLoxT, Callable(..),
+    LoxM, LoxVal(LoxFn), Object(..), emptyClass, runLox, Callable(..),
     callable)
 
 object :: IO Object
@@ -22,8 +22,8 @@ object = Object emptyClass <$> newTVarIO (HM.fromList flds)
                ,(Str "sleep", LoxFn $ callable "Thread.sleep" sleep)
                ]
 
-runThread :: Callable -> LoxT ()
-runThread fn = get >>= fork . runLoxT (apply fn [])
+runThread :: Callable -> LoxM ()
+runThread fn = get >>= fork . runLox (apply fn [])
     where
         fork = liftIO . void . forkIO . void
 

@@ -57,21 +57,21 @@ errorCls = emptyClass
     , initializer = Just (callable "Error.init" errorInit)
     }
 
-errorInit :: Object -> LoxVal -> LoxT ()
+errorInit :: Object -> LoxVal -> LoxM ()
 errorInit Object{..} msg = do
     frame <- gets stack
     trc <- errorTrace frame
     let props = [(Str "message", msg), (Str "stackTrace", trc)]
     liftIO $ atomically $ modifyTVar' objectFields (<> HM.fromList props)
 
-typeofFn :: LoxVal -> LoxT T.Text
+typeofFn :: LoxVal -> LoxM T.Text
 typeofFn x = return $! typeOf x
 
 clock :: IO Double
 clock = fromTime <$> getTime Realtime
     where fromTime = (/ 1e9) . fromInteger . toNanoSecs
 
-applyFun :: Callable -> AtomArray -> LoxT LoxVal
+applyFun :: Callable -> AtomArray -> LoxM LoxVal
 applyFun fn as = do
     vs <- readArray as
     apply fn (V.toList vs)

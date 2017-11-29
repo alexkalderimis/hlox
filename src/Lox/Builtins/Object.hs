@@ -12,8 +12,8 @@ import Lox.Syntax
 import Lox.Interpreter (bindThis)
 import Lox.Interpreter.Types (
     Class(..), AtomArray(..), Stepper(..), Object(..), LoxException(..),
-    NativeFn, LoxVal(..), LoxT, Callable(..),
-    throwLox, runLoxT, interpreter, argumentError,
+    NativeFn, LoxVal(..), LoxM, Callable(..),
+    throwLox, runLox, interpreter, argumentError,
     unsafeSingleton, Protocol(..), callable, emptyClass
     )
 import qualified Lox.Core.Array as A
@@ -55,14 +55,14 @@ iterator o = do
         next (k:ks) = return (Just k, ks)
     return $! Stepper keys next
 
-getField :: Object -> Atom -> LoxT LoxVal
+getField :: Object -> Atom -> LoxM LoxVal
 getField inst@Object{..} key = do
     hm <- liftIO $ fields inst
     case HM.lookup key hm of
          Nothing -> getMethod objectClass inst key
          Just v -> return v
 
-getMethod :: Class -> Object -> Atom -> LoxT LoxVal
+getMethod :: Class -> Object -> Atom -> LoxM LoxVal
 getMethod cls inst key
     | (Str k) <- key = case HM.lookup k (methods cls) of
                         Nothing -> case superClass cls of
