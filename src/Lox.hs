@@ -6,15 +6,15 @@ module Lox
     , runPrompt
     ) where
 
-import Prelude hiding (readFile, getLine, putStr, putStrLn, unwords)
+import Prelude hiding (readFile, putStr, putStrLn)
 import System.Console.Haskeline
-import Data.Text hiding (foldr, null, filter)
+import Data.Text hiding (null)
 import Data.Maybe
 import System.IO (hFlush, stderr, stdout)
 import System.Exit
 import Data.IORef
 import Data.Monoid
-import Data.Text.IO (hPutStrLn, readFile, getLine, putStrLn, putStr)
+import Data.Text.IO (hPutStrLn, readFile, putStrLn, putStr)
 import Control.Monad
 import Control.Applicative
 import Control.Monad.State.Strict
@@ -42,7 +42,7 @@ runFile :: FilePath -> IO ()
 runFile fileName = do
     code <- readFile fileName
     let (ts, errs) = tokens code
-    when (not $ null errs) $ do
+    unless (null errs) $ do
         mapM_ print errs
         exitFailure
     let parsed = runParser program (tokenStream fileName ts)
@@ -62,8 +62,7 @@ runPrompt = do
     names <- newIORef ([] :: [Text])
     welcome
     s <- initInterpreter
-    let settings = setComplete (completeNames names)
-                 $ defaultSettings
+    let settings = setComplete (completeNames names) defaultSettings
     runInputT settings (go 0 names replOpts s)
     where
         exit = outputStrLn "Goodbye!"
@@ -96,23 +95,23 @@ runPrompt = do
                               loop opts env'
 
 welcome :: IO ()
-welcome = mapM_ putStrLn $
-    "Lox REPL":
-    ":? Show help message":
-    []
+welcome = mapM_ putStrLn
+    [ "Lox REPL"
+    , ":? Show help message"
+    ]
 
 help :: IO ()
-help = mapM_ putStrLn $
-    "Lox REPL":
-    "Enter to evaluate":
-    ":q Quit":
-    ":? Show this help message":
-    ":t Toggle the display of tokens":
-    ":a Toggle the display of the AST":
-    ":s Toggle the display of the interpreter state":
-    ":r Toggle the display of the result":
-    ":env Print the current environment":
-    []
+help = mapM_ putStrLn
+  ["Lox REPL"
+  ,"Enter to evaluate"
+  ,":q Quit"
+  ,":? Show this help message"
+  ,":t Toggle the display of tokens"
+  ,":a Toggle the display of the AST"
+  ,":s Toggle the display of the interpreter state"
+  ,":r Toggle the display of the result"
+  ,":env Print the current environment"
+  ]
 
 run' :: Int -> ReplOpts -> Interpreter -> Text -> IO Interpreter
 run' i ReplOpts{..} intS code = do
@@ -141,7 +140,7 @@ run' i ReplOpts{..} intS code = do
                       Left e -> do runtimeError e
                                    return intS
                       Right (v, s) -> do
-                          when (not showResult && not (nil v)) $ do
+                          when (not showResult && not (nil v)) $
                               printLox v
                           when showResult $ do
                               putStrLn "==== RESULT"
@@ -149,15 +148,14 @@ run' i ReplOpts{..} intS code = do
                           when showState $ do
                               putStrLn "==== STATE"
                               readEnv (bindings s) >>= printBindings.return
-                          when (not $ HS.null $ warnings s) $ do
-                              mapM_ (putStrLn . ("[WARNING] " <>)) (warnings s)
+                          mapM_ (putStrLn . ("[WARNING] " <>)) (warnings s)
                           recordIt v s
 
 printBindings :: [HashMap Text LoxVal] -> IO ()
 printBindings [] = return ()
 printBindings (m:ms) = do
     putStrLn "-------------"
-    forM (HM.toList m) $ \(k, v) -> do
+    forM_ (HM.toList m) $ \(k, v) -> do
         putStr k
         putStr " = "
         printLox v
@@ -178,9 +176,9 @@ parseError e = case e of
 runtimeError :: RuntimeError -> IO ()
 runtimeError (RuntimeError ts e) = printError e >> printTrace ts
     where
-        printError (LoxError msg) = putStrLn $ "[INTERNAL ERROR] " <> msg
+        printError (LoxError msg)    = putStrLn $ "[INTERNAL ERROR] " <> msg
         printError (FieldNotFound k) = putStrLn $ "[FIELD NOT FOUND] " <> pack (show k)
-        printError (UserError val) = putStrLn $ "[ERROR] " <> pack (show val)
+        printError (UserError val)   = putStrLn $ "[ERROR] " <> pack (show val)
         printError (TypeError ty val) = do
             putStr "[TYPE ERROR]"
             putStr $ " expected " <> ty

@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Lox.VectorEnv where
 
-import Prelude hiding (lookup, (!))
+import Prelude hiding ((!))
 
 import Control.Arrow (second)
 import Data.Traversable
@@ -36,7 +36,7 @@ readEnv Environment{..}
     . HM.map (envVars V.!)
     . HM.fromList
     $ envNames
-    where f k r = deref r
+    where f _ = deref
 
 writeRef :: Ref a -> a -> IO ()
 writeRef ref a = writeIORef ref (Just a)
@@ -54,9 +54,9 @@ deref = readIORef
 declare :: k -> Environment k v -> IO (Environment k v)
 declare k Environment{..} = do
     ref <- emptyRef
-    return $ Environment { envVars = envVars <> V.singleton ref
-                         , envNames = (k, V.length envVars) : envNames
-                         }
+    return Environment { envVars = envVars <> V.singleton ref
+                       , envNames = (k, V.length envVars) : envNames
+                       }
 
 -- This implementation requires the calling code to know the index; this
 -- requires precalculation.
@@ -82,11 +82,11 @@ enterScope = id
 
 enterScopeWith :: [(k, v)] -> Environment k v -> IO (Environment k v)
 enterScopeWith vals Environment{..} = do
-    refs <- mapM newRef $ map snd vals
+    refs <- mapM (newRef . snd) vals
     let names = zip (map fst vals) [V.length envVars ..]
-    return $ Environment { envVars = envVars <> V.fromList refs
-                         , envNames = names <> envNames
-                         }
+    return Environment { envVars = envVars <> V.fromList refs
+                       , envNames = names <> envNames
+                       }
 
 --- no way of knowing; better to detect this via an analysis pass
 inCurrentScope :: (Hashable k, Eq k) => k -> Environment k v -> Bool

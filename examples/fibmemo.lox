@@ -1,0 +1,14 @@
+let memo = {}
+
+fun fibonacci(n) {
+  if (n <= 1) return n;
+  let r = memo[n];
+  if (r) return r;
+  return (memo[n] = fibonacci(n - 2) + fibonacci(n - 1));
+}
+
+let start = clock();
+for (let i = 0; i < 40; i = i + 1) {
+  print i + ": " + fibonacci(i);
+}
+print "Time: " + (clock() - start);

@@ -56,7 +56,7 @@ library
 executable hlox-exe
   hs-source-dirs:      app
   main-is:             Main.hs
-  ghc-options:         -Wall -O2 -threaded -rtsopts -with-rtsopts=-N
+  ghc-options:         -Wall -O2 -threaded -rtsopts -with-rtsopts=-N -with-rtsopts=-A2048k -with-rtsopts=-qg0
   build-depends:       base
                      , hlox
   default-language:    Haskell2010
@@ -76,7 +76,7 @@ test-suite lint
   main-is:             Lint.hs
   default-language:    Haskell2010
   build-depends:       base
-                     , hlint >=1.9 && < 2.0
+                     , hlint
 
 source-repository head
   type:     git

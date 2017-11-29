@@ -21,7 +21,7 @@ import qualified Lox.Core.Array as A
 
 string :: Class
 string = emptyClass { className = "String"
-                   , classId = (unsafeSingleton ())
+                   , classId = unsafeSingleton ()
                    , methods = HM.fromList stringMethods
                    , staticMethods = HM.fromList statics
                    , protocols = HM.fromList
@@ -52,13 +52,13 @@ get [s, LoxDbl i] = get [s, LoxInt (round i)]
 get [Txt t, LoxInt i] | 0 <= i && i < T.length t =
     return . Txt . T.take 1 . T.drop i $ t
 
-get [this, Txt k] = do
+get [this, Txt k] =
     case HM.lookup k (methods string) of
       Nothing -> throwLox $ FieldNotFound (Str k)
       Just fn -> LoxFn <$> bindThis this fn
 
 get [_, LoxInt i]
-  = throwLox $ LoxError $ "character index out of bounds"
+  = throwLox $ LoxError "character index out of bounds"
 
 get args = argumentError ["String", "Number"] args
 
@@ -84,12 +84,12 @@ split [Txt t]         = split [Txt t, Txt ""]
 split [Txt t, LoxNil] = split [Txt t, Txt ""]
 
 split [Txt t, Txt ""] -- split into characters
-  = atomArray $ fmap (Txt . T.singleton) $ T.unpack t
+  = atomArray $ Txt . T.singleton <$> T.unpack t
 
 split [Txt t, Txt t'] -- split on separator
-  = atomArray $ fmap Txt $ T.splitOn t' t
+  = atomArray $ Txt <$> T.splitOn t' t
 
 split [Txt t, LoxInt n] -- split into chunks of size n
-  = atomArray $ fmap Txt $ T.chunksOf n t
+  = atomArray $ Txt <$> T.chunksOf n t
 
 split args = argumentError ["String", "String"] args

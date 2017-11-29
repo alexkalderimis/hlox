@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Lox.Builtins (initInterpreter) where
@@ -31,7 +30,7 @@ initInterpreter = do
     interpreter mods env
 
 builtinModules :: IO [(ModuleIdentifier, Object)]
-builtinModules = sequenceA $ fmap sequenceA
+builtinModules = traverse sequenceA
     [(ModuleIdentifier ["math"], maths)
     ,(ModuleIdentifier ["random"], R.random)
     ,(ModuleIdentifier ["io"], LoxIO.object)

@@ -6,6 +6,7 @@ module Lox.Builtins.Thread where
 import qualified Data.HashMap.Strict as HM
 import Control.Concurrent.STM
 import Control.Concurrent
+import Control.Monad (void)
 import Control.Monad.State.Strict (get, liftIO)
 
 import Lox.Syntax (Atom(Str))
@@ -22,10 +23,9 @@ object = Object emptyClass <$> newTVarIO (HM.fromList flds)
                ]
 
 runThread :: Callable -> LoxT ()
-runThread fn = do
-    s <- get
-    _ <- liftIO $ forkIO (runLoxT (apply fn []) s >> return ())
-    return ()
+runThread fn = get >>= fork . runLoxT (apply fn [])
+    where
+        fork = liftIO . void . forkIO . void
 
 sleep :: Double -> IO ()
 sleep n = threadDelay (floor $ n * 1e6)

@@ -11,7 +11,7 @@ import qualified Data.HashMap.Strict as HM
 import Lox.Syntax
 import Lox.Interpreter (bindThis)
 import Lox.Interpreter.Types (
-    Class(..), AtomArray(..), Stepper(..), Object(..), LoxException(FieldNotFound),
+    Class(..), AtomArray(..), Stepper(..), Object(..), LoxException(..),
     NativeFn, LoxVal(..), LoxT, Callable(..),
     throwLox, runLoxT, interpreter, argumentError,
     unsafeSingleton, Protocol(..), callable, emptyClass
@@ -23,51 +23,44 @@ import qualified Lox.Core.Array as A
 baseClass :: Class
 baseClass = emptyClass
     { className = "Object"
-    , classId = (unsafeSingleton ())
+    , classId = unsafeSingleton ()
     , methods = HM.fromList
                 [("keys", callable "Object::keys" objectKeys)
-                ,("entries", (BuiltIn "Object::entries" (== 1) objectEntries))
+                ,("entries", callable "Object::entries" objectEntries)
                 ]
     , protocols = HM.fromList
-                  [ ( Settable, BuiltIn "[] =" (== 3) setField )
-                  , ( Gettable, BuiltIn "[]" (== 2) getField )
-                  , ( Iterable, BuiltIn "__iter" (== 1) iterator )
+                  [ ( Settable, callable "[] =" setField )
+                  , ( Gettable, callable "[]" getField )
+                  , ( Iterable, callable "__iter" iterator )
                   ]
     }
 
-objectKeys :: Object -> LoxT LoxVal
+objectKeys :: Object -> IO AtomArray
 
-objectKeys o = liftIO $ do
+objectKeys o = do
     hm <- atomically . readTVar $ objectFields o
-    vs <- AtomArray <$> A.fromList (fmap LoxLit $ HM.keys hm)
-    return (LoxArray vs)
+    AtomArray <$> A.fromList (LoxLit <$> HM.keys hm)
 
-objectEntries :: NativeFn
-
-objectEntries [LoxObj o] = do
-    es <- HM.toList <$> liftIO (fields o)
-    vs <- atomArray <$> liftIO (mapM pair es >>= A.fromList)
-    return vs
+objectEntries :: Object -> IO AtomArray
+objectEntries o = do
+    es <- HM.toList <$> fields o
+    AtomArray <$> (mapM pair es >>= A.fromList)
     where
-        atomArray = LoxArray . AtomArray
-        pair (k, v) = atomArray <$> A.fromList [LoxLit k, v]
+        pair (k, v) = LoxArray . AtomArray <$> A.fromList [LoxLit k, v]
 
-iterator :: NativeFn
-
-iterator [LoxObj o] = do
+iterator :: Object -> IO Stepper
+iterator o = do
     keys <- fmap LoxLit . HM.keys <$> liftIO (fields o)
     let next []     = return (Nothing, [])
         next (k:ks) = return (Just k, ks)
-        it = Stepper keys next
-    return $ LoxIter it
+    return $! Stepper keys next
 
-getField :: NativeFn
-
-getField [LoxObj inst@Object{..}, LoxLit k] = do
+getField :: Object -> Atom -> LoxT LoxVal
+getField inst@Object{..} key = do
     hm <- liftIO $ fields inst
-    case HM.lookup k hm of
-      Nothing -> getMethod objectClass inst k
-      Just v -> return v
+    case HM.lookup key hm of
+         Nothing -> getMethod objectClass inst key
+         Just v -> return v
 
 getMethod :: Class -> Object -> Atom -> LoxT LoxVal
 getMethod cls inst key
@@ -80,12 +73,9 @@ getMethod cls inst key
     where
         fieldNotFound = throwLox (FieldNotFound key)
 
-setField :: NativeFn
-
-setField [LoxObj Object{..}, LoxLit k, v] =
-    v <$ (liftIO $ atomically $ modifyTVar' objectFields (HM.insert k v))
-
-setField args = argumentError ["Object", "String", "Any"] args
+setField :: Object -> Atom -> LoxVal -> IO LoxVal
+setField Object{..} k v = 
+    v <$ atomically (modifyTVar' objectFields $ HM.insert k v)
 
 fields :: Object -> IO (HM.HashMap Atom LoxVal)
 fields = atomically . readTVar . objectFields

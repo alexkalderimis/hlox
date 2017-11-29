@@ -3,6 +3,8 @@ fun fibonacci(n) {
   return fibonacci(n - 2) + fibonacci(n - 1);
 }
 
-for (let i = 0; i < 20; i = i + 1) {
-  print fibonacci(i);
+let start = clock();
+for (let i = 0; i < 30; i = i + 1) {
+  print i + ": " + fibonacci(i);
 }
+print "Time: " + (clock() - start);

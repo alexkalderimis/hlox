@@ -24,7 +24,7 @@ import Lox.Interpreter.Types (
 
 array :: Class
 array = emptyClass { className = "Array"
-                   , classId = (unsafeSingleton ())
+                   , classId = unsafeSingleton ()
                    , methods = HM.fromList arrayMethods
                    , staticMethods = HM.fromList statics
                    , protocols = HM.fromList
@@ -52,7 +52,7 @@ arrayMethods = [(n, BuiltIn ("Array::" <> n) a f) | (BuiltIn n a f) <- fns]
               ]
 
 getElement :: AtomArray -> LoxVal -> LoxT LoxVal
-getElement xs@(AtomArray arr) k = go k
+getElement xs@(AtomArray arr) = go
     where
         go (LoxDbl d) = go (LoxInt $ round d)
         go (LoxInt i) | i < 0 = throwLox (LoxError "negative array index")
@@ -61,7 +61,7 @@ getElement xs@(AtomArray arr) k = go k
             if i < n
                then A.get i arr
                else throwIO (FieldNotFound (AInt i))
-        go (Txt k) = do
+        go (Txt k) =
             case lookup k arrayMethods of
               Nothing -> throwLox (FieldNotFound (Str k))
               Just fn -> LoxFn <$> bindThis (LoxArray xs) fn
@@ -74,13 +74,12 @@ setElement (AtomArray arr) i e
 
 -- iterator takes a read-only snapshot of the array
 -- to avoid issues due to modification.
-iterator :: AtomArray -> IO LoxVal
+iterator :: AtomArray -> IO Stepper
 iterator arr = do
     xs <- readArray arr
-    let seed   = (0 :: Int)
+    let seed   = 0 :: Int
         next i = return (xs !? i, succ i)
-        it = Stepper seed next
-    return (LoxIter it)
+    return $! Stepper seed next
 
 inclusiveRange :: LoxVal -> LoxVal -> IO AtomArray
 inclusiveRange (LoxInt from) (LoxInt to) | from <= to = do

@@ -26,7 +26,7 @@ import Data.Default
 import Data.Proxy
 import Data.Monoid
 import Data.String
-import Data.Text hiding (unwords, length, reverse)
+import Data.Text
 import Data.Data (Typeable, Data)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
@@ -99,7 +99,7 @@ data Statement' v a
     | Print Loc (Expr' v a)
     | Return Loc (Expr' v a)
     | Throw Loc (Expr' v a)
-    | Try Loc (Statement' v a) [(v, (Statement' v a))]
+    | Try Loc (Statement' v a) [(v, Statement' v a)]
     | While Loc (Expr' v a) (Statement' v a)
     | Import Loc ModuleIdentifier (Maybe (Pattern v))
     deriving (Show, Data, Typeable, Functor)

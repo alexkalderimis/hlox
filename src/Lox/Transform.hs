@@ -2,7 +2,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Lox.Transform where
@@ -81,7 +80,7 @@ handleStatement (Define loc p e) = do
 
 handleStatement (ClassDecl loc name var super ms) = do
     var' <- replaceName var
-    super' <- sequence $ fmap getSubstitute super
+    super' <- traverse getSubstitute super
     ms' <- mapM handleMethod ms
     return (ClassDecl loc name var' super' ms')
 
@@ -116,7 +115,7 @@ handleMethod :: Meth -> ReplaceM Meth
 handleMethod (Constructor args stm) = scoped $ do
     declareThis
     Constructor <$> bindArgs args <*> handleStatement stm
-handleMethod (StaticMethod nm args stm) = scoped $ do
+handleMethod (StaticMethod nm args stm) = scoped $
     StaticMethod nm <$> bindArgs args <*> handleStatement stm
 handleMethod (InstanceMethod nm args stm) = scoped $ do
     declareThis

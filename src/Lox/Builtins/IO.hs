@@ -8,7 +8,7 @@ import qualified Data.HashMap.Strict as HM
 import Control.Concurrent.STM
 
 import Lox.Syntax (Atom(Str))
-import Lox.Interpreter.Types hiding (arity)
+import Lox.Interpreter.Types
 
 object :: IO Object
 object = Object emptyClass <$> newTVarIO (HM.fromList flds)

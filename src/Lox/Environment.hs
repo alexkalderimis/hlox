@@ -1,8 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 module Lox.Environment where
 
-import Prelude hiding (lookup)
-
 import Control.Arrow (second)
 import Data.Traversable
 import Data.Monoid
@@ -19,7 +17,7 @@ import Control.Concurrent.STM
 type Ref a = TVar (Maybe a)
 
 newtype Environment k a = Environment
-    { envVars :: (HM.HashMap k (Ref a))
+    { envVars :: HM.HashMap k (Ref a)
     }
 
 instance (Hashable k, Eq k) => Monoid (Environment k v) where
@@ -29,7 +27,7 @@ instance (Hashable k, Eq k) => Monoid (Environment k v) where
 
 readEnv :: Environment k a -> IO (HashMap k a)
 readEnv = atomically . fmap (HM.mapMaybe id) . HM.traverseWithKey f . envVars
-    where f k r = readTVar r
+    where f k = readTVar
 
 writeRef :: Ref a -> a -> IO ()
 writeRef ref a = atomically $ writeTVar ref (Just a)
@@ -48,7 +46,7 @@ deref = readTVarIO
 declare :: (Hashable k, Eq k) => k -> Environment k v -> IO (Environment k v)
 declare k Environment{..} = do
     ref <- emptyRef
-    return $ Environment { envVars = HM.insert k ref envVars }
+    return Environment { envVars = HM.insert k ref envVars }
 
 -- define sets the value of an existing binding, returning
 -- True iff the bounding was found.
@@ -66,11 +64,11 @@ enterScope = id
 
 enterScopeWith :: (Eq k, Hashable k) => [(k, v)] -> Environment k v -> IO (Environment k v)
 enterScopeWith vals Environment{..} = do
-    refs <- mapM newRef $ map snd vals
+    refs <- mapM (newRef . snd) vals
     let vars = foldr insertPair envVars (zip (map fst vals) refs)
     return $ Environment vars
     where 
-        insertPair (k,v) m = HM.insert k v m
+        insertPair = uncurry HM.insert
 
 --- no way of knowing; better to detect this via an analysis pass
 inCurrentScope :: (Hashable k, Eq k) => k -> Environment k v -> Bool

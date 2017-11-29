@@ -1,0 +1,13 @@
+fun fibonacci(n) {
+    fun fib_tail(n, a, b) {
+        if (n == 0) return a;
+        return fib_tail(n - 1, b, a + b);
+    }
+    return fib_tail(n, 0, 1)
+}
+
+let start = clock();
+for (let i = 0; i < 40; i = i + 1) {
+  print i + ": " + fibonacci(i);
+}
+print "Time: " + (clock() - start);

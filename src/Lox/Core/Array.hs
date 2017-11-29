@@ -1,12 +1,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 
 -- Lox has mutable arrays, supporting indexed reads and writes
 -- 
 -- Growth is biased to the right: Pushing is O(1), but unshifting is O(n).
 module Lox.Core.Array where
-
-import Prelude hiding (reverse, foldl)
 
 import Data.Data (Typeable, Data)
 import Control.Monad
@@ -33,7 +30,7 @@ new n = Array <$> newIORef n <*> (Vector.replicate n def >>= newIORef)
 size :: Array a -> IO Int
 size (Array n _) = readIORef n
 
-readArray :: (Array a) -> IO (V.Vector a)
+readArray :: Array a -> IO (V.Vector a)
 readArray (Array n' xs) = do
     n <- readIORef n'
     readIORef xs >>= V.freeze . Vector.slice 0 n
@@ -70,7 +67,7 @@ set i a (Array n' xs') = do
                          m = max (if n < 1 then 16 else n) (2 * i - n)
                      bigger <- Vector.unsafeGrow xs m
                      writeIORef n' (i + 1)
-                     forM [n .. n + m - 1] $ \i -> Vector.write bigger i def
+                     forM_ [n .. n + m - 1] $ \i -> Vector.write bigger i def
                      writeIORef xs' bigger
 
 get :: Int -> Array a -> IO a
@@ -80,13 +77,13 @@ range :: Int -> Int -> IO (Array Int)
 range from to = do
     let n = (to - from) + 1
     a <- Vector.new n
-    forM (zip [0 ..] [from .. to]) $ uncurry (Vector.write a)
+    forM_ (zip [0 ..] [from .. to]) $ uncurry (Vector.write a)
     Array <$> newIORef n <*> newIORef a
 
 -- unlike map and filter, this function is not thread-safe.
 -- modifying the array during the fold could case errors when reading elements
 foldl :: forall a b m . (Monad m, MonadIO m)
-      => (b -> a -> m b) -> b -> (Array a) -> m b
+      => (b -> a -> m b) -> b -> Array a -> m b
 foldl f acc (Array n' xs') = do
     n <- liftIO $ readIORef n'
     xs <- liftIO $ readIORef xs'
@@ -103,7 +100,7 @@ map :: (Monad m, MonadIO m) => (a -> m b) -> Array a -> m (Array b)
 map f = withVec (mapM f)
 
 filter :: (Monad m, MonadIO m) => (a -> m Bool) -> Array a -> m (Array a)
-filter f xs = withVec (V.filterM f) xs
+filter f = withVec (V.filterM f)
 
 -- create a sorted copy of an array
 --
@@ -111,7 +108,7 @@ filter f xs = withVec (V.filterM f) xs
 -- allow comparing Lox values, which can a) require dereferencing mutable values
 -- and b) fail for incomparable items.
 sorted :: forall a m. (Monad m, MonadIO m)
-       => (a -> a -> m Ordering) -> (Array a) -> m (Array a)
+       => (a -> a -> m Ordering) -> Array a -> m (Array a)
 sorted cmp xs = do
     xs' <- liftIO $ copy xs
     sort cmp xs'
@@ -126,7 +123,7 @@ withVec :: forall a b m. (Monad m, MonadIO m)
 withVec f xs = do
     ys <- liftIO (readArray xs) >>= f
     Array <$> liftIO (newIORef $ V.length ys)
-          <*> (liftIO (V.unsafeThaw ys >>= newIORef))
+          <*> liftIO (V.unsafeThaw ys >>= newIORef)
 
 fromList :: Default a => [a] -> IO (Array a)
 fromList xs = do
@@ -169,7 +166,7 @@ quicksort cmp xs lo hi = do
                else return i
 
 -- reverse the array in place
-reverse :: (Array a) -> IO ()
+reverse :: Array a -> IO ()
 reverse (Array n' xs') = do
     n <- readIORef n'
     xs <- readIORef xs'

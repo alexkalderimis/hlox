@@ -5,7 +5,7 @@
 -- of writing a scanner.
 module Lox.Scanner where
 
-import Prelude hiding (null, take, drop, length, filter, span)
+import Prelude hiding (null, drop, length, span)
 
 import Data.Char
 import Data.Monoid

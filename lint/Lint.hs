@@ -1,10 +1,10 @@
 module Main where
 
 import Control.Monad (when)
-import Language.Haskell.HLint (hlint, Severity(..), suggestionSeverity)
+import Language.Haskell.HLint3
 
 main :: IO ()
 main = do
     hints <- hlint ["src"]
-    let unignored = filter ((> Ignore) . suggestionSeverity) hints
-    when (length hints /= 0) $ error "Failed lint"
+    let unignored = filter ((> Ignore) . ideaSeverity) hints
+    when (length unignored /= 0) $ error "Failed lint"

@@ -392,6 +392,11 @@ instance IsLoxVal AtomArray where
     fromLoxVal (LoxArray xs) = Right xs
     fromLoxVal x = Left (TypeError "Array" x)
 
+instance IsLoxVal Stepper where
+    toLoxVal = LoxIter
+    fromLoxVal (LoxIter s) = Right s
+    fromLoxVal x = Left (TypeError "Iterator" x)
+
 class IsNativeResult r where
     toNativeResult :: r ->  IO (Either LoxException LoxVal)
 
