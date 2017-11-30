@@ -93,7 +93,9 @@ exec' (Import _ modid mp) = do
            Just FromArray{} -> loxError "Cannot use array destructuring in import"
            Just p -> return p
            Nothing -> do flds <- liftIO . atomically $ readTVar (objectFields obj)
-                         return (FromObject [(k, Name k) | (Str k) <- HM.keys flds])
+                         return $ FromObject [FieldPattern k (Name k) Nothing 
+                                             | (Str k) <- HM.keys flds
+                                             ]
 
     declareAndBind p (LoxObj obj)
 
@@ -349,7 +351,7 @@ eval' (Binary op x y) =
 
 eval' (IfThenElse _ p x y) = do
     b <- truthy <$> eval p
-    if b then eval x else eval y
+    eval $ if b then x else y
 
 eval' (Var _ v) = do
     env <- gets bindings
@@ -547,7 +549,10 @@ apply' (Closure (Lambda _ (positional, rst) body) s) args = do
       Just p -> atomArray (drop (length positional) args) >>= bindPattern p
 
     -- actually run the function here
-    returning (exec body) <* put old
+    returning (evaluate $ unpackBlock body) <* put old
+    where
+        unpackBlock (Block _ stms) = stms
+        unpackBlock e = [e]
 
 addAtoms :: BinaryFn
 addAtoms (LoxArray (AtomArray a)) (LoxArray (AtomArray b)) = do
@@ -707,7 +712,7 @@ moduleToFileName :: ModuleIdentifier -> LoxM FilePath
 moduleToFileName (ModuleIdentifier parts) =
     return $ joinPath (map T.unpack parts) <.> "lox"
 
-declareAndBind :: Pattern VarName -> LoxVal -> LoxM LoxVal
+declareAndBind :: Pattern VarName Atom -> LoxVal -> LoxM LoxVal
 declareAndBind p val = do
     mapM_ declareVar (patternVars p)
     bindPattern p val
@@ -716,7 +721,7 @@ declareAndBind p val = do
 declareVar :: VarName -> LoxM ()
 declareVar v = gets bindings >>= (liftIO . declare v) >>= putEnv . snd
 
-bindPattern :: Pattern VarName -> LoxVal -> LoxM ()
+bindPattern :: Pattern VarName Atom -> LoxVal -> LoxM ()
 bindPattern Ignore _ = return ()
 bindPattern (Name v) x = gets bindings >>= liftIO . assign v x >> return ()
 -- destructure objects (more precisely, gettable things)
@@ -726,10 +731,13 @@ bindPattern (FromObject ps) x = do
                >>= maybe (loxError $ "Cannot destructure " <> typeOf x) return
     destructureObj getter ps x
     where
-        bindField getf k p o = apply getf [o, Txt k] >>= bindPattern p
+        -- bindField getf k p o = apply getf [o, Txt k] >>= bindPattern p
         destructureObj _ [] _ = return ()
-        destructureObj fn ((k,p):rest) o = do
-            bindField fn k p o
+        destructureObj fn (FieldPattern k p mdef : rest) o = do
+            val <- apply fn [o, Txt k] `catchError` \e -> case cause e of
+                    FieldNotFound key | Str k == key -> maybe (throwError e) eval mdef
+                    _                                -> throwError e
+            bindPattern p val
             destructureObj fn rest o
 -- destructure arrays
 bindPattern (FromArray ps mp) (LoxArray (AtomArray arr)) = do

@@ -357,7 +357,7 @@ assignment = do
             let rhs = Literal here $ AInt 1
             return (Assign here (Just op) lhs rhs)
 
-pattern :: Parser (Pattern VarName)
+pattern :: Parser (Pattern VarName Atom)
 pattern = do
     t <- next
     case t of
@@ -371,9 +371,13 @@ pattern = do
         kvPat = do
             IDENTIFIER v <- next
             mp <- optional (expect COLON >> pattern)
-            return (v, fromMaybe (Name v) mp)
+            mv <- optional (expect EQUAL >> assignment)
+            return FieldPattern { fpField = v
+                                , fpPattern = fromMaybe (Name v) mp
+                                , fpDefault = mv
+                                }
 
-patternList :: Parser ([Pattern VarName], Maybe (Pattern VarName))
+patternList :: Parser ([Pattern VarName Atom], Maybe (Pattern VarName Atom))
 patternList = do
     ps <- manySepBy COMMA pattern
     rest <- optional $ do if null ps then pure () else expect COMMA

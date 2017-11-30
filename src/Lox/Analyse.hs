@@ -33,7 +33,7 @@ assignedVars' (ClassDecl _ _ classname _ ms) = do
     modify' (HS.insert classname)
     HS.unions <$> mapM assignedInMethod ms
     where
-        boundInArgs :: Arguments' VarName -> AssignedM ()
+        boundInArgs :: Arguments' VarName a -> AssignedM ()
         boundInArgs (vs, mv) = do
             let bound = (vs >>= patternVars) ++ maybe [] patternVars mv
             modify' (<> HS.fromList bound)

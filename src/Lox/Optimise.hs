@@ -12,6 +12,8 @@ import Lox.Syntax
 fromParsed :: Parsed -> Parsed
 fromParsed = simplifyExpr
 
+-- perform a bunch of obvious simplifications
+-- note, we end up eliding stack frames with this transformation.
 simplifyExpr :: Parsed -> Parsed
 simplifyExpr = everywhere $ mkT k
     where

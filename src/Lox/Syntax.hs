@@ -49,8 +49,8 @@ range (start :..: end) = (fst (range start), snd (range end))
 range Unlocated = let r = ("No File", 0, 0) in (r, r)
 range NativeCode = let r = ("Native-Code", 0, 0) in (r, r)
 
-type Arguments = Arguments' VarName
-type Arguments' v = ([Pattern v], Maybe (Pattern v))
+type Arguments = Arguments' VarName Atom
+type Arguments' v a = ([Pattern v a], Maybe (Pattern v a))
 
 newtype ModuleIdentifier = ModuleIdentifier { unModuleIdentifier :: [Text] }
     deriving (Show, Eq, Data, Typeable, Generic)
@@ -59,10 +59,10 @@ instance Hashable ModuleIdentifier
 
 type Method = Method' VarName Atom
 data Method' v a
-    = Constructor (Arguments' v) (Statement' v a)
-    | StaticMethod VarName (Arguments' v) (Statement' v a)
-    | InstanceMethod VarName (Arguments' v) (Statement' v a)
-    deriving (Show, Functor, Data, Typeable)
+  = Constructor (Arguments' v a) (Statement' v a)
+  | StaticMethod VarName (Arguments' v a) (Statement' v a)
+  | InstanceMethod VarName (Arguments' v a) (Statement' v a)
+  deriving (Show, Functor, Data, Typeable)
 
 type Statement = Statement' VarName Atom
 data Statement' v a
@@ -71,11 +71,11 @@ data Statement' v a
     | ClassDecl Loc VarName v (Maybe v) [Method' v a]
     | Continue Loc
     | Declare Loc v
-    | Define Loc (Pattern v) (Expr' v a)
-    | DefineFn Loc v (Arguments' v) (Statement' v a)
+    | Define Loc (Pattern v a) (Expr' v a)
+    | DefineFn Loc v (Arguments' v a) (Statement' v a)
     | ExprS (Expr' v a)
     | If Loc (Expr' v a) (Statement' v a) (Maybe (Statement' v a))
-    | Iterator Loc (Pattern v) (Expr' v a) (Statement' v a)
+    | Iterator Loc (Pattern v a) (Expr' v a) (Statement' v a)
     | ForLoop Loc (Maybe (Statement' v a))
                              (Maybe (Expr' v a))
                              (Maybe (Statement' v a))
@@ -85,7 +85,7 @@ data Statement' v a
     | Throw Loc (Expr' v a)
     | Try Loc (Statement' v a) [(v, Statement' v a)]
     | While Loc (Expr' v a) (Statement' v a)
-    | Import Loc ModuleIdentifier (Maybe (Pattern v))
+    | Import Loc ModuleIdentifier (Maybe (Pattern v a))
     deriving (Show, Data, Typeable, Functor)
 
 instance Located (Statement' v a) where
@@ -128,16 +128,23 @@ instance Described (Statement' v a) where
 
 type LVal = LVal' VarName Atom
 data LVal' v a
-    = LVar (Pattern v)
+    = LVar (Pattern v a)
     | Set (Expr' v a) VarName
     | SetIdx (Expr' v a) (Expr' v a)
     deriving (Show, Functor, Data, Typeable)
 
-data Pattern v = Ignore
-               | Name v
-               | FromObject [(VarName, Pattern v)]
-               | FromArray [Pattern v] (Maybe (Pattern v))
-               deriving (Show, Functor, Data, Typeable)
+data Pattern v a
+    = Ignore
+    | Name v
+    | FromObject [FieldPattern v a]
+    | FromArray [Pattern v a] (Maybe (Pattern v a))
+    deriving (Show, Functor, Data, Typeable)
+
+data FieldPattern v a = FieldPattern
+    { fpField :: VarName
+    , fpPattern :: Pattern v a
+    , fpDefault :: Maybe (Expr' v a)
+    } deriving (Show, Functor, Data, Typeable)
 
 type Expr = Expr' VarName Atom
 data Expr' v a
@@ -158,7 +165,7 @@ data Expr' v a
     | Mapping Loc [(Atom, Expr' v a)]
     deriving (Show, Functor, Data, Typeable)
 
-data Lambda v a = Lambda (Maybe VarName) (Arguments' v) (Statement' v a)
+data Lambda v a = Lambda (Maybe VarName) (Arguments' v a) (Statement' v a)
     deriving (Show, Functor, Data, Typeable)
 
 instance Located (Expr' v a) where
@@ -267,12 +274,15 @@ simplify loc = let (l@(a, b, c), r@(d, e, f)) = range loc
                 in if l == r then Loc a b c
                              else Loc a b c :..: Loc d e f
 
-patternVars :: Pattern v -> [v]
+patternVars :: Pattern v a -> [v]
 patternVars Ignore = []
 patternVars (Name v) = [v]
 patternVars (FromArray ps mp) = (ps >>= patternVars) ++ maybe [] patternVars mp
-patternVars (FromObject pairs) = fmap snd pairs >>= patternVars
+patternVars (FromObject pairs) = fmap fpPattern pairs >>= patternVars
 
+
+$(deriveBifunctor ''FieldPattern)
+$(deriveBifunctor ''Pattern)
 $(deriveBifunctor ''Lambda)
 $(deriveBifunctor ''LVal')
 $(deriveBifunctor ''Method')

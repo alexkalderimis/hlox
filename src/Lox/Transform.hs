@@ -24,7 +24,7 @@ type St = Statement' Variable Atom
 type Exp = Expr' Variable Atom
 type Meth = Method' Variable Atom
 type LV = LVal' Variable Atom
-type Args = Arguments' Variable
+type Args = Arguments' Variable Atom
 
 renameVars :: Parsed -> Replaced
 renameVars p = evalState (renameVarsM p') (0, HM.empty)
@@ -140,8 +140,9 @@ handleLVar (Set e name) = do
     return (Set e' name)
 handleLVar (SetIdx l r) = SetIdx <$> handleExpr l <*> handleExpr r
 
-handlePattern :: Pattern Variable -> ReplaceM (Pattern Variable)
+handlePattern :: Pattern Variable a -> ReplaceM (Pattern Variable a)
 handlePattern Ignore = return Ignore
 handlePattern (Name n) = Name <$> getSubstitute n
 handlePattern (FromArray ps mp) = FromArray <$> mapM handlePattern ps <*> mapM handlePattern mp
-handlePattern (FromObject ps) = FromObject <$> mapM (\(k,p) -> (k,) <$> handlePattern p) ps
+handlePattern (FromObject ps) = FromObject <$> mapM f ps
+    where f fp = (\p -> fp { fpPattern = p }) <$> handlePattern (fpPattern fp)

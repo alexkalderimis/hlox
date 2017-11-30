@@ -192,6 +192,9 @@ runtimeError (RuntimeError ts e) = printError e >> printTrace ts
             put . pack $ show ex
             end
         printTrace [] = return ()
+        printTrace (("Throw", wo):frames) = do
+            putl $ unwords ["thrown at", niceLoc wo]
+            printTrace frames
         printTrace ((was,wo):frames) = do
             putl $ unwords [" ", "in", was, "at", niceLoc wo]
             printTrace frames
