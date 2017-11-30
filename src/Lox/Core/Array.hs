@@ -5,12 +5,10 @@
 -- Growth is biased to the right: Pushing is O(1), but unshifting is O(n).
 module Lox.Core.Array where
 
-import Data.Data (Typeable, Data)
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IORef
 import Data.Monoid
-import Data.Traversable
 import Data.Default
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as Vector
@@ -58,7 +56,7 @@ set i a (Array n' xs') = do
     n <- readIORef n'
     xs <- readIORef xs'
     case (i < n, i < Vector.length xs) of
-      (_,    False) -> grow xs >> readIORef xs' >>= (\xs -> Vector.write xs i a)
+      (_,    False) -> grow xs >> readIORef xs' >>= (\v -> Vector.write v i a)
       (True, True)  -> Vector.write xs i a
       (False, True) -> Vector.write xs i a >> writeIORef n' (i + 1)
     where
@@ -67,7 +65,8 @@ set i a (Array n' xs') = do
                          m = max (if n < 1 then 16 else n) (2 * i - n)
                      bigger <- Vector.unsafeGrow xs m
                      writeIORef n' (i + 1)
-                     forM_ [n .. n + m - 1] $ \i -> Vector.write bigger i def
+                     let v = def
+                     forM_ [n .. n + m - 1] $ \idx -> Vector.write bigger idx v
                      writeIORef xs' bigger
 
 get :: Int -> Array a -> IO a
@@ -137,7 +136,8 @@ sort cmp (Array n' xs') = do
     xs <- liftIO (readIORef xs')
     quicksort cmp xs 0 (n - 1)
 
-quicksort :: forall a m. (Monad m, MonadIO m) => (a -> a -> m Ordering) -> Vector.IOVector a -> Int -> Int -> m ()
+quicksort :: forall a m. (Monad m, MonadIO m)
+          => (a -> a -> m Ordering) -> Vector.IOVector a -> Int -> Int -> m ()
 quicksort _   _  lo hi | lo >= hi = return ()
 quicksort cmp xs lo hi = do
     p <- partition lo hi
@@ -146,9 +146,9 @@ quicksort cmp xs lo hi = do
 
     where
         recur = quicksort cmp xs
-        partition lo hi = do
-            pivot <- liftIO (Vector.read xs lo)
-            loop pivot (lo - 1) (hi + 1)
+        partition lo' hi' = do
+            pivot <- liftIO (Vector.read xs lo')
+            loop pivot (lo' - 1) (hi' + 1)
         loop pivot i j = do
             i' <- highest pivot i
             j' <- lowest pivot j
@@ -173,7 +173,7 @@ reverse (Array n' xs') = do
     go xs 0 (n - 1)
 
     where
-        go xs i j | i >= j = return ()
+        go _  i j | i >= j = return ()
         go xs i j = do
             Vector.swap xs i j
             go xs (i + 1) (j - 1)
