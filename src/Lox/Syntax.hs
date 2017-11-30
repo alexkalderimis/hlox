@@ -15,30 +15,14 @@
 
 module Lox.Syntax where
 
-import Control.Monad.IO.Class
-import Control.Exception.Base (Exception)
-import Control.Exception (try, catch)
-import Data.Bifunctor
-import Data.Fixed
-import Data.HashMap.Strict (HashMap)
-import Data.Hashable (Hashable, hash)
-import Data.Default
-import Data.Proxy
+import Data.Hashable (Hashable)
 import Data.Monoid
 import Data.String
 import Data.Text
 import Data.Data (Typeable, Data)
-import Data.Vector (Vector)
 import GHC.Generics (Generic)
-import Lox.Environment (readEnv, Environment)
-import System.IO.Unsafe (unsafePerformIO)
 import Data.Bifunctor.TH
-import Control.Concurrent.STM
-import qualified Data.HashMap.Strict as HM
-import qualified Data.List as L
 import qualified Data.Text as T
-
-import qualified Lox.Core.Array as A
 
 type VarName = Text
 
@@ -191,6 +175,7 @@ instance Located (Expr' v a) where
     sourceLoc (GetField loc _ _) = loc
     sourceLoc (Index loc _ _) = loc
     sourceLoc (Array loc _) = loc
+    sourceLoc (ArrayRange loc _ _) = loc
     sourceLoc (Mapping loc _) = loc
 
 instance Described (Expr' v a) where
@@ -237,6 +222,8 @@ instance Ord Atom where
     (Str a) `compare` (Str b) = a `compare` b
     (Str _) `compare` _ = GT
     _ `compare` (Str _) = LT
+    a `compare` b = error $ "Ord Atom is broken, unexpected case: "
+                          <> show a <> " `compare` " <> show b
 
 instance Eq Atom where
     a == b = EQ == (a `compare` b)

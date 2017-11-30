@@ -12,7 +12,6 @@ import Data.Monoid
 import Data.Text hiding (reverse)
 import Control.Monad.State.Strict
 import Control.Arrow ((&&&))
-import qualified Data.List as L
 import qualified Data.Text.Read as Read
 import qualified Data.HashSet as HS
 
@@ -36,9 +35,9 @@ tokens :: Code -> (Tokens, [ScanError])
 tokens src = runScanner (scan src)
 
 tokensFrom :: Int -> Text -> (Tokens, [ScanError])
-tokensFrom line src = (reverse.productions &&& failed)
+tokensFrom lineNo src = (reverse.productions &&& failed)
                       $ execState (scan src)
-                      $ ScannerState [] [] line 0
+                      $ ScannerState [] [] lineNo 0
 
 type ScanError = (Int, Int, Text)
 type Tokens = [(Int, Int, Token)]
@@ -130,7 +129,7 @@ go (Just (c, rst)) =
 
 varOrKeyword :: Char -> Text -> Scanner
 varOrKeyword c src = do
-    let (str, rst) = span (\c -> isAlphaNum c || c == '_') src
+    let (str, rst) = span (\x -> isAlphaNum x || x == '_') src
         ident = singleton c <> str
         tok = if HS.member ident reservedWords
                  then KEYWORD ident
@@ -176,7 +175,7 @@ number i rst = do
         mr -> do
             let num = singleton i <> integral
             case Read.decimal num of
-                Right (i,_) -> addToken (INT i)
+                Right (int,_) -> addToken (INT int)
                 Left e -> addError (pack e)
             advanceN (length num)
             go mr
