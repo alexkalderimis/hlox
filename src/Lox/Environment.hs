@@ -1,13 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Lox.Environment where
 
-import Control.Arrow (second)
-import Data.Traversable
-import Data.Monoid
-import Data.Foldable (foldMap)
-import Data.Sequence (Seq, (><), (|>))
 import Data.Hashable
-import qualified Data.Sequence as Seq
 import qualified Data.HashMap.Strict as HM
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashSet as HS
@@ -26,8 +20,7 @@ instance (Hashable k, Eq k) => Monoid (Environment k v) where
         Environment (HM.union vs' vs)
 
 readEnv :: Environment k a -> IO (HashMap k a)
-readEnv = atomically . fmap (HM.mapMaybe id) . HM.traverseWithKey f . envVars
-    where f k = readTVar
+readEnv = atomically . fmap (HM.mapMaybe id) . traverse readTVar . envVars
 
 writeRef :: Ref a -> a -> IO ()
 writeRef ref a = atomically $ writeTVar ref (Just a)
