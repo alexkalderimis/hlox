@@ -32,8 +32,8 @@ simplifyExpr = everywhere $ mkT k
                     Binary And lhs@(Literal _ a) rhs -> if true a then rhs else lhs
                     Binary Or  lhs@(Literal _ a) rhs -> if false a then rhs else lhs
 
-                    Not loc (Literal here a)                               -> Literal loc (ABool (false a))
-                    Not loc (Binary op lhs rhs) | Just op' <- inverse op   -> Binary op' lhs rhs
+                    Not _ (Literal here a)                               -> Literal here (ABool (false a))
+                    Not _ (Binary op lhs rhs) | Just op' <- inverse op   -> Binary op' lhs rhs
 
                     Negate loc (Literal _ a) -> Literal loc (num negate a)
 
@@ -44,6 +44,7 @@ simplifyExpr = everywhere $ mkT k
 
         false Nil = True
         false (ABool False) = True
+        false _ = False
         true = not . false
 
         fn Add      = Just (+)

@@ -4,7 +4,6 @@
 module Lox.Analyse where
 
 import Data.Monoid
-import Control.Applicative
 import Control.Monad
 import qualified Data.HashSet as HS
 
@@ -87,8 +86,8 @@ assignedVars' (Try _ stm handlers) = do
     a <- assignedVars stm
     put closed
     b <- HS.unions <$> forM handlers
-                       (\(v, stm) -> do modify' (HS.insert v)
-                                        assignedVars stm <* put closed)
+                       (\(v, h) -> do modify' (HS.insert v)
+                                      assignedVars h <* put closed)
     return (a <> b)
 assignedVars' (While _ e stm) = (<>) <$> assignments e <*> assignedVars stm
 

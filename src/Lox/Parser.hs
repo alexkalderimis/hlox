@@ -4,14 +4,13 @@
 
 module Lox.Parser where
 
-import Prelude hiding (span)
+import Prelude hiding (break, span, fail)
 
-import Control.Monad
+import Control.Monad.Fail
 import Data.Maybe
 import Data.Monoid
 import Control.Applicative
-import Data.Text hiding (span, null, empty, group, reverse)
-import qualified Data.Vector as V
+import Data.Text hiding (span, break, null, empty, group, reverse)
 
 import Lox.Syntax hiding (Statement, Expr, Method)
 import Lox.Scanner (Tokens, Token(..))
@@ -55,10 +54,12 @@ instance Applicative Parser where
                                 in (f <*> a, s'')
 instance Monad Parser where
     return = pure
-    fail e = Parser $ \s -> (Left (Recoverable (location s) (pack e)), s)
     pa >>= f = Parser $ \s ->
         let (ma, s') = runParser pa s
          in either (\es -> (Left es, s')) (\a -> runParser (f a) s') ma
+
+instance MonadFail Parser where
+    fail e = Parser $ \s -> (Left (Recoverable (location s) (pack e)), s)
 
 instance Alternative Parser where
     empty   = Parser (Left NoParse,)
@@ -336,9 +337,9 @@ assignment = do
         lval = do
             lhs <- call
             case lhs of
-              (GetField loc e name) -> return (Set e name)
-              (Index loc e idx) -> return (SetIdx e idx)
-              (Var loc name) -> return (LVar (Name name))
+              (GetField _ e name) -> return (Set e name)
+              (Index _ e idx) -> return (SetIdx e idx)
+              (Var _ name) -> return (LVar (Name name))
               _ -> empty
         assign' = do
             here <- loc
@@ -425,6 +426,7 @@ unary = p <|> fnExpr <|> call <|> atom
             case op of
                 BANG -> return (Not (span start end) e)
                 MINUS -> return (Negate (span start end) e)
+                _ -> fail "impossible"
 
 call :: Parser Expr
 call = atom >>= finishCall
@@ -442,14 +444,10 @@ call = atom >>= finishCall
                 end <- loc
                 finishCall $ Call (sourceLoc e `span` end) e args
             Just DOT -> do
-                meth <- is inMethod
                 name <- identifier <|> ("class" <$ keyword "class")
                 end <- loc
                 finishCall $ GetField (sourceLoc e `span` end) e name
-        super meth = do keyword "super"
-                        if meth then return "super"
-                                else fatal "illegal reference to super outside method"
-
+            Just t -> fail $ "Unexpected token: " ++ show t
 
 group :: Parser Expr
 group = do
