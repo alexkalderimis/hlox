@@ -83,7 +83,7 @@ instance Monad LoxM where
 instance MonadState Interpreter LoxM where
     state f = LoxM $ \i -> return (f $! i)
 
--- the errors we ca catch
+-- the errors we can catch are 'RuntimeError's
 instance MonadError RuntimeError LoxM where
     throwError e = LoxM $ \_ -> throwIO e
     catchError (LoxM action) handler = LoxM $ \s -> do
@@ -91,6 +91,20 @@ instance MonadError RuntimeError LoxM where
         case mret of
           Right r -> return r
           Left e -> let (LoxM cont) = handler e in cont $! s
+
+instance MonadIO LoxM where
+    liftIO io = LoxM $ \s -> do
+        ret <- fmap Right io `catches` handlers
+        case ret of
+          Left e -> throwIO (RuntimeError (stack s) e)
+          Right r -> return (r, s)
+        where
+            handlers = [ Handler $ \ (ex :: IOException) -> handle ex
+                       , Handler $ \ (ex :: ErrorCall) -> handle ex
+                       , Handler $ \ (ex :: LoxException) -> return (Left ex)
+                       ]
+            handle :: (Exception e) => e -> IO (Either LoxException a)
+            handle e = return . Left . CaughtEx $ toException e
 
 throwLox :: LoxException -> LoxM a
 throwLox e = LoxM $ \s -> throwIO $ RuntimeError (stack s) e
@@ -121,20 +135,6 @@ returning (LoxM f) = LoxM $ \s -> do
     case ret of
       Left (LoxReturn val s') -> return (val, s')
       Right (_, s') -> return (LoxNil, s')
-
-instance MonadIO LoxM where
-    liftIO io = LoxM $ \s -> do
-        ret <- fmap Right io `catches` handlers
-        case ret of
-          Left e -> throwIO (RuntimeError (stack s) e)
-          Right r -> return (r, s)
-        where
-            handlers = [ Handler $ \ (ex :: IOException) -> handle ex
-                       , Handler $ \ (ex :: ErrorCall) -> handle ex
-                       , Handler $ \ (ex :: LoxException) -> return (Left ex)
-                       ]
-            handle :: (Exception e) => e -> IO (Either LoxException a)
-            handle e = return . Left . CaughtEx $ toException e
 
 runLox :: LoxM a -> Interpreter -> LoxResult a
 runLox (LoxM f) s = try (fst <$> f s)
@@ -271,6 +271,9 @@ data RuntimeError = RuntimeError
     } deriving (Show, Typeable)
 
 instance Exception RuntimeError
+-- you can also throw LoxExceptions directly when using embedded IO
+-- this will get promoted correctly to a runtime error and can be caught
+-- with catchError. 
 instance Exception LoxException
 
 data LoxReturn = LoxReturn LoxVal Interpreter deriving (Typeable)
@@ -430,10 +433,6 @@ instance (IsLoxVal v) => IsNativeFn (LoxM v) where
 instance IsNativeFn LoxVal where
     toNativeFn r = toNativeFn (return r :: IO LoxVal)
 
--- functions carry around references to Object and Array
--- which lets us use literal notation.
-type CoreClasses = (Class, Class)
-
 fnName :: Callable -> VarName
 fnName (BuiltIn n _ _) = n
 fnName (Closure (Lambda mn _ _) _) = fromMaybe "<Anon>" mn
@@ -451,7 +450,6 @@ arity (Closure (Lambda _ args _) _) n
   = case args of
       (_, Just _) -> True
       (pos, _) -> length pos == n
-
 
 instance Show Callable where
     show (Closure lam _) = unwords ["(Closure", show lam, ")"]

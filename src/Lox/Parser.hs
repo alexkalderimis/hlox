@@ -6,7 +6,7 @@ module Lox.Parser where
 
 import Prelude hiding (break, span, fail)
 
-import Control.Monad.Fail
+import Control.Monad
 import Data.Maybe
 import Data.Monoid
 import Control.Applicative
@@ -52,14 +52,15 @@ instance Applicative Parser where
     pf <*> pa = Parser $ \s -> let (f, s') = runParser pf s
                                    (a, s'') = runParser pa s'
                                 in (f <*> a, s'')
+
+-- in order to handle pattern match failure correctly, it is very important
+-- that fail be implemented here, and *not* as part of MonadFail
 instance Monad Parser where
     return = pure
+    fail e = Parser $ \s -> (Left (Recoverable (location s) (pack e)), s)
     pa >>= f = Parser $ \s ->
         let (ma, s') = runParser pa s
          in either (\es -> (Left es, s')) (\a -> runParser (f a) s') ma
-
-instance MonadFail Parser where
-    fail e = Parser $ \s -> (Left (Recoverable (location s) (pack e)), s)
 
 instance Alternative Parser where
     empty   = Parser (Left NoParse,)
