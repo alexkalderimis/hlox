@@ -50,7 +50,7 @@ runFile fileName = do
                     exitFailure
       Right p -> do s <- initInterpreter
                     let prog = fromParsed p
-                    res <- evalLox (runProgram prog) s
+                    res <- evalLox (evaluate prog) s
                     case res of
                       Left e -> do runtimeError e
                                    exitFailure
@@ -128,7 +128,7 @@ run' i ReplOpts{..} intS code = do
       Left e  -> do parseError e
                     return intS
       Right p -> do let prog = fromParsed p
-                        lox = runProgram prog
+                        lox = evaluate prog
                     when showAST $ do
                         putStrLn "==== PROG"
                         print prog
@@ -205,5 +205,5 @@ niceLoc loc = case range loc of
 
 recordIt :: LoxVal -> Interpreter -> IO Interpreter
 recordIt LoxNil s = return s
-recordIt v s = do env <- declare "it" (enterScope $ bindings s)
-                  s { bindings = env } <$ assign "it" v env
+recordIt it s = do (ref, env) <- declare "it" (enterScope $ bindings s)
+                   s { bindings = env } <$ writeRef ref it

@@ -6,7 +6,7 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Lox.Interpreter (
-    eval, apply, exec, bindThis, runProgram, run, printLox,
+    eval, apply, exec, bindThis, evaluate, run, printLox,
     (<=>)
     ) where
 
@@ -15,7 +15,7 @@ import Prelude hiding (init)
 import Control.Exception (catch)
 import Control.Concurrent.STM
 import Control.Applicative
-import Control.Arrow ((&&&), second)
+import Control.Arrow (second)
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Control.Monad (unless, when)
@@ -27,16 +27,13 @@ import Data.Maybe
 import Data.Monoid
 import Data.Text (Text)
 import Data.Function (on)
-import Data.Traversable
 import Text.Printf (printf)
 import System.FilePath (joinPath, (<.>))
 import qualified Data.HashMap.Strict as HM
-import qualified Data.HashSet as HS
 import qualified Data.List as L
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Vector as V
-import           Data.Vector ((!?))
 
 import Lox.Syntax
 import Lox.Analyse (isAssignedIn)
@@ -44,10 +41,9 @@ import Lox.Scanner (tokens)
 import Lox.Parser (runParser, tokenStream, program)
 import Lox.Optimise (fromParsed)
 import qualified Lox.Core.Array as A
-
 import Lox.Environment (
-    Ref, declare, assign, resolve, newRef, writeRef, deref, readEnv, diffEnv,
-    enterScope, enterScopeWith, inCurrentScope)
+    Ref, declare, assign, resolve, writeRef, deref, diffEnv,
+    enterScope, enterScopeWith)
 import Lox.Interpreter.Types
 
 type BinaryFn = (LoxVal -> LoxVal -> LoxM LoxVal)
@@ -66,11 +62,10 @@ instance MonadLox LoxM where
         liftIO (T.putStrLn s)
 
 run :: Env -> Program -> IO Value
-run env program = interpreter [] env >>= runLox (runProgram program)
+run env = (interpreter [] env >>=) . runLox . evaluate
 
-runProgram :: Program -> LoxM LoxVal
-runProgram = foldM run def
-    where run _ = exec
+evaluate :: Program -> LoxM LoxVal
+evaluate = foldM (pure exec) def
 
 withStack :: (Described a, Located a) => (a -> LoxM LoxVal) -> a -> LoxM LoxVal
 withStack f a = do
@@ -88,16 +83,19 @@ exec = withStack exec'
 eval :: Expr -> LoxM LoxVal
 eval = withStack eval'
 
-exec' (Import loc mod mp) = do
-    mod <- getModule mod
+-- evaluation machinery
+exec' :: Statement -> LoxM LoxVal
+
+exec' (Import _ modid mp) = do
+    obj <- getModule modid
     -- in the context of imports, _ means import all
     p <- case mp of
            Just FromArray{} -> loxError "Cannot use array destructuring in import"
            Just p -> return p
-           Nothing -> do flds <- liftIO . atomically $ readTVar (objectFields mod)
+           Nothing -> do flds <- liftIO . atomically $ readTVar (objectFields obj)
                          return (FromObject [(k, Name k) | (Str k) <- HM.keys flds])
 
-    declareAndBind p (LoxObj mod)
+    declareAndBind p (LoxObj obj)
 
 exec' (Print _ e) = def <$ (eval e >>= printLox)
 
@@ -108,7 +106,7 @@ exec' (Throw _ e) = do v <- UserError <$> eval e
 
 exec' (Try _ stm handlers) = exec stm `catchError` handleWith handlers
 
-exec' (DefineFn loc v args body) = {-# SCC "exec-define-fun" #-} do
+exec' (DefineFn _ v args body) = {-# SCC "exec-define-fun" #-} do
     declareVar v
     s <- get
     let fn = Lambda (Just v) args body
@@ -119,15 +117,13 @@ exec' (DefineFn loc v args body) = {-# SCC "exec-define-fun" #-} do
 exec' (Define _ p e) =
     eval e >>= declareAndBind p
 
-exec' (Declare _ v) = do
-    env <- gets bindings >>= liftIO . declare v
-    putEnv env
-    return def
+exec' (Declare _ v) = lvoid $ declareVar v
 
 exec' (ClassDecl _ name _ msuper methods) = do
-    declareVar name
+    (ref, env) <- gets bindings >>= liftIO . declare name
+    putEnv env
     s <- get
-    parent <- traverse (findSuperClass (bindings s)) msuper
+    parent <- traverse (findSuperClass env) msuper
     classId <- liftIO newSingleton
     base <- knownClass "Object"
 
@@ -156,16 +152,16 @@ exec' (ClassDecl _ name _ msuper methods) = do
                              , methods = HM.fromList instances
                              , protocols = maybe mempty protocols parent
                              }
-    liftIO $ assign name cls (bindings s)
+    liftIO $ writeRef ref cls
     return cls
 
     where
         findSuperClass :: Env -> VarName -> LoxM Class
-        findSuperClass env name = do
-            ma <- join <$> traverse (liftIO . deref) (resolve name env)
+        findSuperClass env sup = do
+            ma <- join <$> traverse (liftIO . deref) (resolve sup env)
             case ma of
               Just (LoxClass c) -> return c
-              Nothing -> loxError $ "Could not find super-class " <> name
+              Nothing -> loxError $ "Could not find super-class " <> sup
               Just a -> loxError $ "Cannot inherit from " <> typeOf a
 
 exec' (Block _ sts) = do
@@ -195,29 +191,27 @@ exec' (ForLoop loc minit mcond mpost body) =
       (Just (Define _ (Name var) e)
         , (Just (Binary op (Var _ var') limit))
           , (Just (ExprS (Assign _ (Just Add) (LVar (Name var'')) (Literal _ (AInt step))))))
-        | op `elem` [LessThan, LessThanEq]
+        | Just cmp <- comp op
         , var == var'
         , var == var''
         , var `notAssignedIn` body -> do
             start <- eval e
-            env <- gets bindings
             case start of
-              LoxInt i -> optimisedLoop AInt i step                var (comp op) limit
-              LoxDbl i -> optimisedLoop ADbl i (fromIntegral step) var (comp op) limit
+              LoxInt i -> optimisedLoop AInt i step                var cmp limit
+              LoxDbl i -> optimisedLoop ADbl i (fromIntegral step) var cmp limit
               _ -> asWhile
       _ -> asWhile
     where
-        comp :: BinaryOp -> Atom -> Atom -> Bool
-        comp LessThan = (<)
-        comp LessThanEq = (<=)
+        comp :: BinaryOp -> Maybe (Atom -> Atom -> Bool)
+        comp LessThan = Just (<)
+        comp LessThanEq = Just (<=)
+        comp _ = Nothing
         -- the optimised loop prevents most loop bookkeeping - preventing
         -- lookups of the loop var and function application of the post-cond.
         optimisedLoop :: forall a. Num a => (a -> Atom) -> a -> a -> VarName -> (Atom -> Atom -> Bool) -> Expr -> LoxM LoxVal
         optimisedLoop con i step var comp' limit = do
             old <- gets bindings
-            env <- liftIO (declare var old)
-            ref <- maybe (loxError "Could not find declared var") return
-                   $ resolve var env
+            (ref, env) <- liftIO (declare var old)
             putEnv env *> whileLoop con ref comp' limit i step <* putEnv old
             return LoxNil
 
@@ -249,26 +243,22 @@ exec' (ForLoop loc minit mcond mpost body) =
                   putEnv env
                   return LoxNil
     
-exec' (Iterator _ p e body) = do
+exec' (Iterator _ p e body) = lvoid $ do
     (old, env) <- modEnv enterScope
-
     Stepper a next <- eval e >>= iterable
 
-    loop env a next
-
-    putEnv old
-    return LoxNil
+    loop env a next >> putEnv old
     where
-        loop env a next = do
-            mapM_ declareVar (patternVars p)
-            (ma, a') <- next a
-            case ma of
-              Nothing -> return LoxNil
-              Just curr -> do
-                  bindPattern p curr
-                  broke <- runLoop (exec body)
-                  if broke then return LoxNil
-                           else loop env a' next
+      loop env a next = do
+        mapM_ declareVar (patternVars p)
+        (ma, a') <- next a
+        whenJust ma $ \curr -> do
+          bindPattern p curr
+          broke <- runLoop (exec body)
+          unless broke $ loop env a' next
+
+whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
+whenJust ma f = maybe (return ()) f ma
 
 handleWith :: [(VarName, Statement)] -> RuntimeError -> LoxM LoxVal
 handleWith [] e = throwError e
@@ -276,10 +266,12 @@ handleWith (h:hs) e = do
     let (var, stm) = h
     old <- gets bindings
     err <- runtimeToLoxVal e
-    declareAndBind (Name var) (LoxObj err)
     let cleanup = putEnv old
-    (exec stm >> LoxNil <$ cleanup)
-        `catchError` (\e -> cleanup >> handleWith hs e)
+    (lvoid $ declareAndBind (Name var) (LoxObj err) >> exec stm >> cleanup)
+        `catchError` (\e2 -> cleanup >> handleWith hs e2)
+
+lvoid :: LoxM a -> LoxM LoxVal
+lvoid = (LoxNil <$)
 
 iterable :: LoxVal -> LoxM Stepper
 iterable a = do
@@ -294,7 +286,7 @@ eval' :: Expr -> LoxM LoxVal
 
 eval' (Fn _ lambda) = LoxFn . Closure lambda <$> get
 
-eval' (GetField loc e field) = {-# SCC "eval-get-field" #-} do
+eval' (GetField _ e field) = {-# SCC "eval-get-field" #-} do
     inst <- eval e
     case inst of
       (LoxClass cls) | field == "name" -> return (Txt $ className cls)
@@ -309,7 +301,7 @@ eval' (GetField loc e field) = {-# SCC "eval-get-field" #-} do
     where
         cannotGet x = loxError $ "Cannot read fields of " <> typeOf x
 
-eval' (Index loc e ei) = do
+eval' (Index _ e ei) = do
     o <- eval e
     i <- eval ei
     getter <- lookupProtocol Gettable o
@@ -318,7 +310,7 @@ eval' (Index loc e ei) = do
     where
         cannotGet o = loxError $ "Cannot index " <> typeOf o
         onErr (RuntimeError _ FieldNotFound{}) = return LoxNil
-        onErr e = throwError e
+        onErr err = throwError err
 
 eval' (Literal _ a) = pure (LoxLit a)
 
@@ -348,7 +340,7 @@ eval' (Binary Or x y) = do
         then return a
         else eval y
 
-eval' b@(Binary op x y) =
+eval' (Binary op x y) =
     case HM.lookup op binaryFns of
         Nothing -> loxError $ "Unknown operator: " <> T.pack (show op)
         Just f  -> do a' <- eval x
@@ -362,14 +354,12 @@ eval' (IfThenElse _ p x y) = do
 eval' (Var _ v) = do
     env <- gets bindings
     ma <- maybe undef (liftIO . deref) (resolve v env)
-    case ma of
-        Nothing -> uninit
-        Just v -> return v
+    maybe uninit return ma
 
     where undef = loxError $ "Undefined variable: " <> v
           uninit = loxError $ "Uninitialised variable: " <> v
 
-eval' (Assign loc mop (LVar (Name v)) e) = {-# SCC "eval-assign-var" #-} do
+eval' (Assign _ mop (LVar (Name v)) e) = do
     x <- eval e
     env <- gets bindings
     ref <- maybe undeclared return (resolve v env)
@@ -377,7 +367,7 @@ eval' (Assign loc mop (LVar (Name v)) e) = {-# SCC "eval-assign-var" #-} do
       Nothing -> liftIO (writeRef ref x) >> return x
       -- some things we can at least attempt to do in STM
       Just Add -> do r <- liftIO $ (Just <$> transactional ref x)
-                                    `catch` (\(e :: LoxException) -> return Nothing)
+                                    `catch` (\(_ :: LoxException) -> return Nothing)
                      maybe (nonTransactional Add ref x) return r
       -- other things we have to accept discontinuities
       Just op -> nonTransactional op ref x
@@ -392,19 +382,18 @@ eval' (Assign loc mop (LVar (Name v)) e) = {-# SCC "eval-assign-var" #-} do
           -- TODO: extend to other operations than just Add
           transactional ref x = liftIO . atomically $ do
             old <- fromMaybe LoxNil <$> readTVar ref
-            new <- addSTM old x
-            writeTVar ref (Just new)
-            return new
+            val <- addSTM old x
+            val <$ writeTVar ref (Just val)
 
-eval' (Assign loc Nothing (LVar p) e) = do
+eval' (Assign _ Nothing (LVar p) e) = do
     x <- eval e
     bindPattern p x
     return x
 
-eval' (Assign loc (Just op) (LVar _) _) =
+eval' (Assign _ (Just _) (LVar _) _) =
     loxError "Cannot perform modifying assignment on a complex pattern"
 
-eval' (Assign loc mop (SetIdx lhs idx) e) = {-# SCC "eval-assign-idx" #-} do
+eval' (Assign _ mop (SetIdx lhs idx) e) = {-# SCC "eval-assign-idx" #-} do
     target <- eval lhs
     k <- eval idx
     v <- eval e
@@ -418,8 +407,7 @@ eval' (Assign loc mop (SetIdx lhs idx) e) = {-# SCC "eval-assign-idx" #-} do
           old <- apply getter [target, k]
           fn <- maybe noop return $ HM.lookup op binaryFns
           v' <- fn old v
-          apply setter [target, k, v']
-          return v'
+          v' <$ apply setter [target, k, v']
     where
         cannotSet a = loxError $ "Cannot assign fields on " <> typeOf a
         cannotGet a = loxError $ "Cannot read fields on " <> typeOf a
@@ -436,7 +424,7 @@ eval' (Assign _ mop (Set lhs fld) e) = do
         cannotSet o = loxError $ "Cannot assign to " <> typeOf o
         cannotGet o = loxError $ "Cannot read fields of " <> typeOf o
         unknownOp   = loxError $ "Unknown operator"
-        value o v | isNothing mop = return v
+        value _ v | isNothing mop = return v
         value o v                 = do
             fn <- maybe unknownOp return (mop >>= flip HM.lookup binaryFns)
             getter <- lookupProtocol Gettable o
@@ -462,7 +450,7 @@ eval' (Call _ callee args) = {-# SCC "eval-fun-call" #-} do
 
 eval' (Array _ exprs) = mapM eval exprs >>= atomArray
 
-eval' (ArrayRange loc expr expr') = do
+eval' (ArrayRange _ expr expr') = do
     start <- eval expr
     end <- eval expr'
     case (start, end) of
@@ -471,24 +459,21 @@ eval' (ArrayRange loc expr expr') = do
       _ -> throwLox (ArgumentError "[..]" ["Int", "Int"] [start, end])
 
 
-eval' (Mapping loc pairs) = do
+eval' (Mapping _ pairs) = do
     cls <- knownClass "Object"
     vals <- mapM (sequence . second eval) pairs
     obj <- new cls vals
     return (LoxObj obj)
 
 init :: Object -> [LoxVal] -> LoxM ()
-init obj args = construct obj args
-    where
-        construct = case initializer (objectClass obj) of
-            Nothing -> defaultConstr
-            Just fn -> \o args -> do bound <- bindThis (LoxObj o) fn
-                                     apply bound args
-                                     return ()
-                                          
-        defaultConstr _ args = unless (null args) wrongArity
-        wrongArity = loxError $ "Wrong number of arguments to constructor. Expected 0, got "
-                              <> T.pack (show (length args))
+init obj args
+  | Just fn <- minitf = void $ withThis (LoxObj obj) fn args
+  | null args         = return ()
+  | otherwise         = loxError wrongArity
+  where
+    minitf = initializer (objectClass obj)
+    wrongArity = "Wrong number of arguments to constructor. Expected 0, got "
+                 <> T.pack (show (length args))
 
 lookupProtocol :: Protocol -> LoxVal -> LoxM (Maybe Callable)
 lookupProtocol p a = do
@@ -525,11 +510,15 @@ instantiate cls args = do
     return $! LoxObj obj
 
 bindThis :: LoxVal -> Callable -> LoxM Callable
-bindThis this (BuiltIn n ar fn)
-  = return $ BuiltIn n (\n -> ar (n + 1)) (\args -> fn (this : args))
+bindThis this (BuiltIn name ar fn)
+  = return $ BuiltIn name (\n -> ar (n + 1)) (\args -> fn (this : args))
 bindThis this (Closure lam s)
   = do env <- liftIO (enterScopeWith [("this", this)] (bindings s))
        return $ Closure lam s { bindings = env }
+
+withThis :: LoxVal -> Callable -> [LoxVal] -> LoxM LoxVal
+withThis this fn args = do bound <- bindThis this fn
+                           apply bound args
 
 apply :: Callable -> [LoxVal] -> LoxM LoxVal
 apply fn args = do
@@ -598,16 +587,17 @@ numericalFn name _ _ a b = loxError $ mconcat [ "Cannot apply operator: "
                                               ]
 
 stringify :: LoxVal -> LoxM Text
-stringify LoxNil      = return "nil"
-stringify (Txt t)     = return t
-stringify (LoxBool b) = return . T.pack $ fmap toLower (show b)
-stringify (LoxInt n)  = return . T.pack $ show n
-stringify (LoxDbl n)  = return . T.pack $ printf "%f" n
-stringify (LoxFn fn)  = return "<function>"
+stringify (LoxLit a)  = return $ case a of
+    Nil     -> "nil"
+    Str t   -> t
+    ABool b -> T.pack $ fmap toLower (show b)
+    AInt n  -> T.pack $ show n
+    ADbl n  -> T.pack $ printf "%f" n
+stringify (LoxFn _)  = return "<function>"
+stringify (LoxIter _)  = return "<iterator>"
 stringify (LoxClass cls) = return $ "<class " <> className cls <> ">"
 stringify (LoxObj o) | Just fn <- HM.lookup "toString" (methods $ objectClass o) = do
-    fn <- bindThis (LoxObj o) fn
-    apply fn [] >>= stringify
+    withThis (LoxObj o) fn [] >>= stringify
 stringify (LoxObj Object{..}) = do
     fieldMap <- liftIO $ atomically (readTVar objectFields)
     let fs = L.sortBy (compare `on` fst) . HM.toList $ fieldMap
@@ -637,11 +627,13 @@ binaryFns = HM.fromList
     ,(Subtract,      numericalFn "-" (-) (-))
     ,(Multiply,      numericalFn "*" (*) (*))
     ,(Divide,        divide)
-    ,(Mod,           numericalFn "%" ((fromIntegral .) . mod `on` floor) mod)
+    ,(Mod,           numericalFn "%" (onInt mod) mod)
     ,(Seq,           \a b -> a `seq` return b)
     ,(Exponent,      numericalFn "**" (**) (^))
     ]
     where
+        onInt :: IntFn -> DblFn
+        onInt f = (fromIntegral .) . f `on` floor
         lb f a b = LoxBool . maybe False f <$> a <=> b
         divide (LoxNum n) (LoxNum d) = return (LoxDbl (n/d))
         divide a          b          = loxError $ mconcat ["Cannot divide "
@@ -664,7 +656,7 @@ a            === b            = fmap (== Just EQ) (a <=> b)
     ords <- V.zipWithM (<=>) as bs
     return $ fromMaybe (Just (V.length as `compare` V.length bs))
            $ V.find (/= Just EQ) ords
-a <=> b = return Nothing
+_a <=> _b = return Nothing
 
 initialise :: LoxM a -> LoxM a
 initialise lox = do
@@ -678,19 +670,19 @@ notAssignedIn :: VarName -> Statement -> Bool
 notAssignedIn var stm = not (var `isAssignedIn` stm)
 
 getModule :: ModuleIdentifier -> LoxM Object
-getModule mod = do
+getModule modid = do
     mods <- gets modules
-    x <- HM.lookup mod <$> liftIO (readIORef mods)
+    x <- HM.lookup modid <$> liftIO (readIORef mods)
     case x of
-      Just Loading -> loxError ("Module cycle detected " <> showModId mod)
+      Just Loading -> loxError ("Module cycle detected " <> showModId modid)
       Just (Loaded o) -> return o
       Nothing -> do
-          liftIO $ modifyIORef' mods (HM.insert mod Loading)
-          o <- loadModule mod `catchError` unblock mods
-          liftIO $ modifyIORef' mods (HM.insert mod (Loaded o))
+          liftIO $ modifyIORef' mods (HM.insert modid Loading)
+          o <- loadModule modid `catchError` unblock mods
+          liftIO $ modifyIORef' mods (HM.insert modid (Loaded o))
           return o
     where
-        unblock ref e = do liftIO (modifyIORef' ref (HM.delete mod))
+        unblock ref e = do liftIO (modifyIORef' ref (HM.delete modid))
                            throwError e
 
 loadModule :: ModuleIdentifier -> LoxM Object
@@ -706,7 +698,7 @@ loadModule m = do
                 Left e -> loxError ("Could not parse " <> showModId m <> ", " <> T.pack (show e))
                 Right r -> return r
     put (moduleInterpreter s)
-    env <- runProgram (fromParsed parsed) >> gets bindings
+    env <- evaluate (fromParsed parsed) >> gets bindings
     put s
     vals <- liftIO (envToFields $ diffEnv (bindings s) env)
     return (Object (modcls s) vals)
@@ -727,7 +719,7 @@ declareAndBind p val = do
     return val
 
 declareVar :: VarName -> LoxM ()
-declareVar v = gets bindings >>= (liftIO . declare v) >>= putEnv
+declareVar v = gets bindings >>= (liftIO . declare v) >>= putEnv . snd
 
 bindPattern :: Pattern VarName -> LoxVal -> LoxM ()
 bindPattern Ignore _ = return ()
@@ -739,11 +731,11 @@ bindPattern (FromObject ps) x = do
                >>= maybe (loxError $ "Cannot destructure " <> typeOf x) return
     destructureObj getter ps x
     where
+        bindField getf k p o = apply getf [o, Txt k] >>= bindPattern p
         destructureObj _ [] _ = return ()
-        destructureObj fn ((k,p):ps) x = do
-            x' <- apply fn [x, LoxString k]
-            bindPattern p x'
-            destructureObj fn ps x
+        destructureObj fn ((k,p):rest) o = do
+            bindField fn k p o
+            destructureObj fn rest o
 -- destructure arrays
 bindPattern (FromArray ps mp) (LoxArray (AtomArray arr)) = do
     forM_ (zip [0 ..] ps) $ \(i, p) -> do

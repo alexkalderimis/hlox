@@ -19,9 +19,10 @@ import Lox.Syntax (
     Loc(..), range)
 import Lox.Parser (
     tokenStream, expression, program, ParseError(..), Parser(runParser))
-import Lox.Environment (Environment(..), declare, assign, enterScope, readEnv, boundNames)
+import Lox.Environment (
+    Environment(..), declare, assign, enterScope, readEnv, writeRef, boundNames)
 import Lox.Interpreter (
-    eval, run, runProgram, printLox, bindThis)
+    eval, run, evaluate, printLox, bindThis)
 import Lox.Interpreter.Types (
     Env, LoxException(..), RuntimeError(..), LoxVal(..), Program, Value, LoxResult, typeOf, nil,
     pattern LoxNil, pattern LoxNum, pattern LoxInt, pattern LoxDbl,

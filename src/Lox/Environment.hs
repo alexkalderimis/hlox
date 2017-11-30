@@ -43,10 +43,10 @@ deref = readTVarIO
 
 -- Declare a variable in the current scope
 -- Previous bindings are shadowed by the insert
-declare :: (Hashable k, Eq k) => k -> Environment k v -> IO (Environment k v)
+declare :: (Hashable k, Eq k) => k -> Environment k v -> IO (Ref v, Environment k v)
 declare k Environment{..} = do
     ref <- emptyRef
-    return Environment { envVars = HM.insert k ref envVars }
+    return (ref, Environment { envVars = HM.insert k ref envVars })
 
 -- define sets the value of an existing binding, returning
 -- True iff the bounding was found.
