@@ -37,8 +37,8 @@ class Described a where
 stackFrame :: (Located a, Described a) => a -> StackFrame
 stackFrame a = (describe a, simplify (sourceLoc a))
 
-data Loc = Loc !Text !Int !Int
-         | Loc :..: Loc
+data Loc = Loc !Text {-# UNPACK #-} !Int {-# UNPACK #-} !Int
+         | !Loc :..: !Loc
          | Unlocated
          | NativeCode
     deriving (Eq, Show, Data, Typeable)

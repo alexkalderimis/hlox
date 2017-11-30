@@ -534,10 +534,8 @@ apply' fn args | not (arity fn (length args)) = loxError "Wrong number of argume
 
 apply' (BuiltIn _ _ fn) args = fn args
 
--- you can see why function calls are expensive: loads of setting up and
--- tearing down of the environment here.
 apply' (Closure (Lambda _ (positional, rst) body) s) args = do
-    old <- get -- snapshot the old environment
+    old <- get -- snapshot the current environment
     -- restore the closed over fn environment, with the stack in the current state
     put s { initialising = initialising old, stack = stack old }
 
@@ -549,10 +547,7 @@ apply' (Closure (Lambda _ (positional, rst) body) s) args = do
       Just p -> atomArray (drop (length positional) args) >>= bindPattern p
 
     -- actually run the function here
-    r <- returning (exec body)
-
-    put old
-    return r
+    returning (exec body) <* put old
 
 addAtoms :: BinaryFn
 addAtoms (LoxArray (AtomArray a)) (LoxArray (AtomArray b)) = do
