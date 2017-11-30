@@ -5,8 +5,6 @@ module Lox.Builtins.String (string) where
 
 import Control.Exception (throwIO)
 import Data.Monoid
-import Data.Maybe
-import Data.String
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
@@ -17,7 +15,6 @@ import Lox.Interpreter.Types (
     NativeFn, LoxException(..), Callable(..), Stepper(..), Class(..), Protocol(..),
     LoxVal(..), pattern LoxNil, pattern LoxInt, pattern LoxDbl, pattern Txt,
     callable, natively, atomArray, throwLox, unsafeSingleton, emptyClass, argumentError)
-import qualified Lox.Core.Array as A
 
 string :: Class
 string = emptyClass { className = "String"
@@ -39,11 +36,8 @@ stringMethods = [(n, BuiltIn ("String::" <> n) a f) | (BuiltIn n a f) <- fns]
         fns = [ natively "upper" T.toUpper
               , natively "lower" T.toLower
               , callable "slice" slice
-              , double "split" split
+              , BuiltIn "split" (\n -> 0 < n && n < 3) split
               ]
-        triple n = BuiltIn n (== 3)
-        double n = BuiltIn n (\n -> n == 2 || n == 1)
-        single n = BuiltIn n (== 1)
 
 get :: NativeFn
 
@@ -52,13 +46,13 @@ get [s, LoxDbl i] = get [s, LoxInt (round i)]
 get [Txt t, LoxInt i] | 0 <= i && i < T.length t =
     return . Txt . T.take 1 . T.drop i $ t
 
+get [_, LoxInt _]
+  = throwLox $ LoxError "character index out of bounds"
+
 get [this, Txt k] =
-    case HM.lookup k (methods string) of
+    case lookup k stringMethods of
       Nothing -> throwLox $ FieldNotFound (Str k)
       Just fn -> LoxFn <$> bindThis this fn
-
-get [_, LoxInt i]
-  = throwLox $ LoxError "character index out of bounds"
 
 get args = argumentError ["String", "Number"] args
 

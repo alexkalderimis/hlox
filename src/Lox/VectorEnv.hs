@@ -1,13 +1,11 @@
 {-# LANGUAGE RecordWildCards #-}
 module Lox.VectorEnv where
 
-import Prelude hiding ((!))
+import Prelude
 
 import Control.Arrow (second)
-import Data.Traversable
 import Data.IORef
 import Data.Monoid
-import Data.Foldable (foldMap)
 import Data.Hashable
 import qualified Data.HashMap.Strict as HM
 import           Data.HashMap.Strict (HashMap)

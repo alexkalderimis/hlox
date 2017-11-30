@@ -4,17 +4,15 @@
 module Lox.Builtins.Object (baseClass) where
 
 import Control.Concurrent.STM
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.IORef
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.HashMap.Strict as HM
 
 import Lox.Syntax
 import Lox.Interpreter (bindThis)
 import Lox.Interpreter.Types (
-    Class(..), AtomArray(..), Stepper(..), Object(..), LoxException(..),
-    NativeFn, LoxVal(..), LoxM, Callable(..),
-    throwLox, runLox, interpreter, argumentError,
-    unsafeSingleton, Protocol(..), callable, emptyClass
+    Class(..), AtomArray(..), Stepper(..), Object(..), LoxException(..), Protocol(..),
+    LoxVal(..), LoxM,
+    throwLox, unsafeSingleton, callable, emptyClass
     )
 import qualified Lox.Core.Array as A
 

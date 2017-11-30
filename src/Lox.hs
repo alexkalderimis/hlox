@@ -6,19 +6,18 @@ module Lox
     , runPrompt
     ) where
 
-import Prelude hiding (readFile, putStr, putStrLn)
-import System.Console.Haskeline
-import Data.Text hiding (null)
-import Data.Maybe
-import System.IO (hFlush, stderr, stdout)
-import System.Exit
+import Prelude hiding (unwords, readFile, putStr, putStrLn)
+
+import Control.Monad 
+import Control.Monad.IO.Class
+import Data.HashMap.Strict (HashMap)
 import Data.IORef
 import Data.Monoid
-import Data.Text.IO (hPutStrLn, readFile, putStrLn, putStr)
-import Control.Monad
-import Control.Applicative
-import Control.Monad.State.Strict
-import Data.HashMap.Strict (HashMap)
+import Data.Text hiding (null)
+import Data.Text.IO (hPutStr, hPutStrLn, readFile, putStrLn, putStr)
+import System.Console.Haskeline
+import System.Exit
+import System.IO (stderr)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
@@ -43,7 +42,7 @@ runFile fileName = do
     code <- readFile fileName
     let (ts, errs) = tokens code
     unless (null errs) $ do
-        mapM_ print errs
+        mapM_ (hPutStrLn stderr . pack . show) errs
         exitFailure
     let parsed = runParser program (tokenStream fileName ts)
     case fst parsed of
@@ -168,38 +167,33 @@ parseError e = case e of
     Recoverable loc msg -> putE loc msg
     where
         putE loc msg = putStrLn $ mconcat ["[SYNTAX ERROR] " ,niceLoc loc ," ", msg ]
-        point t l c = mconcat [t, ": (", pack (show l), ",", pack (show c), ")"]
-        niceLoc loc = let (l@(a, b, c), r@(d, e, f)) = range loc
-                       in if l == r then point a b c
-                                    else point a b c <> " - " <> point d e f
 
 runtimeError :: RuntimeError -> IO ()
 runtimeError (RuntimeError ts e) = printError e >> printTrace ts
     where
-        printError (LoxError msg)    = putStrLn $ "[INTERNAL ERROR] " <> msg
-        printError (FieldNotFound k) = putStrLn $ "[FIELD NOT FOUND] " <> pack (show k)
-        printError (UserError val)   = putStrLn $ "[ERROR] " <> pack (show val)
+        put = hPutStr stderr
+        putl = hPutStrLn stderr
+        end = hPutStrLn stderr ""
+        printError (LoxError msg)    = putl $ "[INTERNAL ERROR] " <> msg
+        printError (FieldNotFound k) = putl $ "[FIELD NOT FOUND] " <> pack (show k)
+        printError (UserError val)   = putl $ "[ERROR] " <> pack (show val)
         printError (TypeError ty val) = do
-            putStr "[TYPE ERROR]"
-            putStr $ " expected " <> ty
-            putStr $ " but got " <> pack (show val) <> " :: " <> typeOf val
-            putStrLn ""
+            put "[TYPE ERROR]"
+            put $ " expected " <> ty
+            put $ " but got " <> pack (show val) <> " :: " <> typeOf val
+            end
         printError (ArgumentError n types args) = do
-            putStr "[ARGUMENT ERROR]"
-            putStr $ " in " <> n <> " expected (" <> intercalate ", " (fmap pack types) <> ")"
-            putStrLn $ " but got (" <> intercalate ", " (fmap typeOf args) <> ")"
+            put "[ARGUMENT ERROR]"
+            put $ " in " <> n <> " expected (" <> intercalate ", " (fmap pack types) <> ")"
+            put $ " but got (" <> intercalate ", " (fmap typeOf args) <> ")"
+            end
         printError (CaughtEx ex) = do
-            putStr "[INTERNAL ERROR] "
-            putStr . pack $ show ex
-            putStrLn ""
-
+            put "[INTERNAL ERROR] "
+            put . pack $ show ex
+            end
         printTrace [] = return ()
         printTrace ((was,wo):frames) = do
-            putStr "  in "
-            putStr was
-            putStr " at "
-            putStr $ niceLoc wo
-            putStrLn ""
+            putl $ unwords [" ", "in", was, "at", niceLoc wo]
             printTrace frames
 
 niceLoc :: Loc -> Text
@@ -212,5 +206,4 @@ niceLoc loc = case range loc of
 recordIt :: LoxVal -> Interpreter -> IO Interpreter
 recordIt LoxNil s = return s
 recordIt v s = do env <- declare "it" (enterScope $ bindings s)
-                  assign "it" v env
-                  return s { bindings = env }
+                  s { bindings = env } <$ assign "it" v env

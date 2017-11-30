@@ -6,16 +6,12 @@
 
 module Lox.Transform where
 
-import Control.Applicative
 import Control.Monad.State.Strict
-import Data.Data (Typeable, Data, gmapM)
+import Data.Data (Data, gmapM)
 import Data.Generics.Aliases
-import Data.Generics.Schemes
 import Data.Maybe
 import Data.Bifunctor
-import Unsafe.Coerce (unsafeCoerce)
 import qualified Data.HashMap.Strict as HM
-import qualified Data.Text as T
 
 import Lox.Syntax
 
@@ -101,7 +97,7 @@ handleStatement (Try loc stm handlers) =
     Try loc <$> scoped (handleStatement stm)
             <*> mapM (uncurry f) handlers
     where
-        f name stm = scoped $ (,) <$> replaceName name <*> handleStatement stm
+        f name block = scoped $ (,) <$> replaceName name <*> handleStatement block
 
 handleStatement (Block loc stms) =
     Block loc <$> scoped (mapM handleStatement stms)
@@ -141,7 +137,7 @@ handleLVar :: LV -> ReplaceM LV
 handleLVar (LVar p) = LVar <$> handlePattern p
 handleLVar (Set e name) = do
     e' <- handleExpr e
-    return (Set e name)
+    return (Set e' name)
 handleLVar (SetIdx l r) = SetIdx <$> handleExpr l <*> handleExpr r
 
 handlePattern :: Pattern Variable -> ReplaceM (Pattern Variable)

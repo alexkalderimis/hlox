@@ -7,20 +7,18 @@ import Control.Monad.IO.Class
 import Control.Exception (throwIO)
 import Data.Monoid
 import Data.Maybe
-import Data.String
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as T
-import qualified Data.Vector as V
 import           Data.Vector ((!?))
 
 import Lox.Syntax
 import qualified Lox.Core.Array as A
 import Lox.Interpreter (apply, bindThis, (<=>))
 import Lox.Interpreter.Types (
-    NativeFn, Stepper(..), LoxException(..), LoxVal(..), Callable(..),
+    Stepper(..), LoxException(..), LoxVal(..), Callable(..),
     Class(..), Protocol(..), unsafeSingleton, emptyClass, AtomArray(..), LoxM,
     pattern LoxInt, pattern LoxNum, pattern LoxDbl, pattern Txt, pattern LoxNil,
-    truthy, callable, toNativeFn, readArray, throwLox)
+    truthy, callable, readArray, throwLox)
 
 array :: Class
 array = emptyClass { className = "Array"
@@ -90,6 +88,7 @@ inclusiveRange (LoxNum from) (LoxNum to)
 inclusiveRange (LoxInt from) (LoxInt to)
   = throwIO . LoxError
   $ "Expected (A, B) where B >= A, got " <> T.pack (show from) <> " and " <> T.pack (show to)
+inclusiveRange a b = throwIO $ ArgumentError "Array.range" ["Int", "Int"] [a, b]
 
 foldArray :: AtomArray -> LoxVal -> Callable -> LoxM LoxVal
 foldArray (AtomArray arr) acc fn =
