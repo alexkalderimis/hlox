@@ -141,7 +141,9 @@ yieldVal :: LoxVal -> LoxM ()
 yieldVal val = do
     channel <- gets yieldChannel
                 >>= maybe (loxError "Cannot yield outside iterator") return
+    -- yield the value to the parent thread
     liftIO . atomically $ putTMVar channel (Yielded val) 
+    -- and wait for this thread to be resumed
     liftIO . atomically $ putTMVar channel Waiting
 
 yielding :: LoxM LoxVal -> LoxM Stepper
