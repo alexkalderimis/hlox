@@ -16,14 +16,16 @@
 
 module Lox.Interpreter.Types where
 
+import Control.Concurrent (forkIO)
 import Control.Concurrent.STM
+import Control.Concurrent.MVar (MVar, putMVar, takeMVar, readMVar, newMVar)
 import Control.Exception (SomeException, IOException, ErrorCall(..), Handler(..),
   throwIO, toException, try, catches)
 import Control.Exception.Base (Exception)
 import Control.Monad.Error.Class
 import Control.Monad.IO.Class
 import Control.Monad.State.Class
-import Control.Monad (foldM)
+import Control.Monad (unless, void, foldM)
 import Data.Bifunctor
 import Data.Data (Typeable, Data)
 import Data.Default
@@ -129,12 +131,45 @@ runLoop = fmap (either (== LoxBreak) (const False)) . tryLoop
 returnVal :: LoxVal -> LoxM a
 returnVal val = LoxM $ \s -> throwIO (LoxReturn val s)
 
+yieldVal :: LoxVal -> LoxM ()
+yieldVal val = do
+    mchannel <- gets yieldChannel
+    case mchannel of
+      Nothing -> loxError "Cannot yield outside iterator"
+      Just channel -> liftIO (putMVar channel (Yielded val))
+
 returning :: LoxM a -> LoxM LoxVal
 returning (LoxM f) = LoxM $ \s -> do
     ret <- try (f s)
     case ret of
       Left (LoxReturn val s') -> return (val, s')
       Right (_, s') -> return (LoxNil, s')
+
+yielding :: LoxM LoxVal -> LoxM Stepper
+yielding lox = do
+    channel <- liftIO (newMVar Waiting)
+    s <- get
+
+    let 
+      runIterator = void $ liftIO $ forkIO $ do
+        r <- runLox lox s { yieldChannel = Just channel }
+        let yv = case r of Left e -> Failed e
+                           Right a -> Done a
+        liftIO $ putMVar channel yv
+
+      next started = do
+        unless started runIterator
+        _ <- liftIO $ takeMVar channel -- unblock writer
+        val <- liftIO $ readMVar channel -- leave channel full
+        case val of
+          Failed e -> throwError e
+          Yielded r -> return (Just r, True)
+          _ -> return (Nothing, True)
+
+    return (Stepper False next)
+
+whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
+whenJust ma f = maybe (return ()) f ma
 
 runLox :: LoxM a -> Interpreter -> LoxResult a
 runLox (LoxM f) s = try (fst <$> f s)
@@ -157,7 +192,14 @@ data Interpreter = Interpreter
     , initialising :: !Bool
     , stack :: ![StackFrame]
     , modcls :: !Class
+    , yieldChannel :: !(Maybe (MVar Yielded))
     } deriving (Typeable)
+
+data Yielded = Waiting
+             | Yielded LoxVal
+             | Done LoxVal
+             | Failed RuntimeError
+             deriving (Typeable, Show)
 
 coreClass :: VarName -> Env -> IO (Either LoxException Class)
 coreClass name env = do
@@ -182,7 +224,7 @@ interpreter modules env = do
     env' <- foldM ensureCls env coreClasses
     modCls <- getMod
     mods <- newIORef $ HM.fromList [(m, Loaded o { objectClass = modCls }) | (m, o) <- modules]
-    return $ Interpreter env' env' mods mempty False [] modCls
+    return $ Interpreter env' env' mods mempty False [] modCls Nothing
     where
         -- initial core object hierarchy
         coreClasses = [ ("Object", Nothing)

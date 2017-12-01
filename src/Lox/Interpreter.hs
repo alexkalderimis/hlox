@@ -188,6 +188,7 @@ exec' (While _ condition body) = lvoid loop
 exec' (Break _)    = throwLoop LoxBreak
 exec' (Continue _) = throwLoop LoxContinue
 exec' (Return _ e) = eval e >>= returnVal
+exec' (Yield _ e)  = lvoid (eval e >>= yieldVal)
 
 exec' (ForLoop loc minit mcond mpost body) = 
     case (minit, mcond, mpost) of
@@ -260,9 +261,6 @@ exec' (Iterator _ p e body) = lvoid $ do
           broke <- runLoop (exec body)
           unless broke $ loop env a' next
 
-whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
-whenJust ma f = maybe (return ()) f ma
-
 handleWith :: [(VarName, Statement)] -> RuntimeError -> LoxM LoxVal
 handleWith [] e = throwError e
 handleWith (h:hs) e = do
@@ -278,12 +276,21 @@ lvoid = (LoxNil <$)
 
 iterable :: LoxVal -> LoxM Stepper
 iterable a = do
-    fn <- lookupProtocol Iterable a
-          >>= maybe (loxError $ "Cannot iterate over " <> typeOf a) return
-    r <- apply fn [a]
-    case r of
-      (LoxIter it) -> return it
-      wrong -> loxError $ "Iterator must return iterable, got " <> typeOf wrong
+    mfn <- customIterable
+    case mfn of
+      Just fn -> yielding (apply fn [])
+      Nothing -> do
+          fn <- lookupProtocol Iterable a
+                >>= maybe (loxError $ "Cannot iterate over " <> typeOf a) return
+          r <- apply fn [a]
+          case r of
+            (LoxIter it) -> return it
+            wrong -> loxError $ "Iterator must return iterable, got " <> typeOf wrong
+    where
+        customIterable = case a of
+          LoxFn fn -> return (Just fn)
+          _ -> do mcls <- classOf a
+                  traverse (bindThis a) (HM.lookup "__iter__" . methods =<< mcls)
 
 eval' :: Expr -> LoxM LoxVal
 
@@ -540,7 +547,10 @@ apply' (BuiltIn _ _ fn) args = fn args
 apply' (Closure (Lambda _ (positional, rst) body) s) args = do
     old <- get -- snapshot the current environment
     -- restore the closed over fn environment, with the stack in the current state
-    put s { initialising = initialising old, stack = stack old }
+    put s { initialising = initialising old
+          , stack = stack old
+          , yieldChannel = yieldChannel old
+          }
 
     -- Bind function arguments, and rest parameter if provided
     mapM_ declareVar ((positional ++ maybeToList rst) >>= patternVars)

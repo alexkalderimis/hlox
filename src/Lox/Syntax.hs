@@ -82,6 +82,7 @@ data Statement' v a
                              (Statement' v a)
     | Print Loc (Expr' v a)
     | Return Loc (Expr' v a)
+    | Yield Loc (Expr' v a)
     | Throw Loc (Expr' v a)
     | Try Loc (Statement' v a) [(v, Statement' v a)]
     | While Loc (Expr' v a) (Statement' v a)
@@ -99,6 +100,7 @@ instance Located (Statement' v a) where
     sourceLoc (Break loc) = loc
     sourceLoc (Continue loc) = loc
     sourceLoc (Return loc _) = loc
+    sourceLoc (Yield loc _) = loc
     sourceLoc (If loc _ _ _) = loc
     sourceLoc (ClassDecl loc _ _ _ _) = loc
     sourceLoc (Iterator loc _ _ _) = loc
@@ -121,6 +123,7 @@ instance Described (Statement' v a) where
     describe ForLoop{} = "For loop"
     describe Print{} = "Print statement"
     describe Return{} = "<return>"
+    describe Yield{} = "<yield>"
     describe Throw{} = "Throw"
     describe Try{} = "Try/Catch"
     describe While{} = "While loop"

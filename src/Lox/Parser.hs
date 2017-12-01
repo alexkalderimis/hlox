@@ -174,6 +174,7 @@ statement = do
     s <- ifStatement
          <|> loopControl
          <|> returnStatement
+         <|> yieldStatement
          <|> printStatement
          <|> throwStatement
          <|> tryCatchStatement
@@ -193,6 +194,13 @@ returnStatement = do
              else do l <- loc
                      mval <- optional expression
                      return (Return l (fromMaybe (Literal l Nil) mval))
+
+yieldStatement :: Parser Statement
+yieldStatement = do
+    KEYWORD "yield" <- next
+    b <- is returnable
+    if not b then fatal "Cannot yield outside a function body"
+             else Yield <$> loc <*> expression
 
 loopControl :: Parser Statement
 loopControl = do
