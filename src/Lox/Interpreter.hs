@@ -7,7 +7,7 @@
 
 module Lox.Interpreter (
     eval, apply, exec, bindThis, evaluate, run, printLox,
-    (<=>)
+    (<=>), stringify
     ) where
 
 import Prelude hiding (init)
