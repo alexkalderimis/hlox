@@ -36,6 +36,7 @@ stringMethods = [(n, BuiltIn ("String::" <> n) a f) | (BuiltIn n a f) <- fns]
         fns = [ natively "upper" T.toUpper
               , natively "lower" T.toLower
               , callable "slice" slice
+              , natively "length" T.length
               , BuiltIn "split" (\n -> 0 < n && n < 3) split
               ]
 
