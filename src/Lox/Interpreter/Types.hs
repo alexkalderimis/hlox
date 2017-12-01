@@ -262,7 +262,16 @@ data LoxVal
     | LoxObj !Object 
     | LoxArray !AtomArray
     | LoxIter !Stepper
+    | NativeObj !HSObj
     deriving (Show, Typeable)
+
+-- embedded host object
+data HSObj = forall x. HSObj x Class
+                       (forall a b. (Typeable a, Typeable b) => (a -> b) -> Maybe b)
+    deriving (Typeable)
+
+instance Show HSObj where
+    show _ = "<hs-obj>"
 
 -- helper patterns to avoiding verbose literals
 pattern LoxNil, Yes, No :: LoxVal
@@ -299,6 +308,7 @@ typeOf (LoxClass _) = "Class"
 typeOf (LoxObj c) = className $ objectClass c
 typeOf (LoxArray _) = "Array"
 typeOf (LoxIter _) = "Iterator"
+typeOf (NativeObj (HSObj _ cls _)) = className cls
 
 data LoxException = LoxError Text
                   | FieldNotFound Atom

@@ -501,6 +501,7 @@ classOf x = case x of
   (LoxString _) -> Just <$> knownClass "String"
   (LoxArray _) -> Just <$> knownClass "Array"
   (LoxObj o) -> return (Just $ objectClass o)
+  (NativeObj (HSObj _ cls _)) -> return (Just cls)
   _ -> return Nothing
 
 -- get a class we know to exist, from the base-environment
@@ -604,6 +605,7 @@ stringify (LoxLit a)  = return $ case a of
     ABool b -> T.pack $ fmap toLower (show b)
     AInt n  -> T.pack $ show n
     ADbl n  -> T.pack $ printf "%f" n
+stringify (NativeObj (HSObj _ cls _)) = return $ "<" <> className cls <> ">"
 stringify (LoxFn _)  = return "<function>"
 stringify (LoxIter _)  = return "<iterator>"
 stringify (LoxClass cls) = return $ "<class " <> className cls <> ">"
