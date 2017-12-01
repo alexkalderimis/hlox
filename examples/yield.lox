@@ -11,6 +11,22 @@ fun deliberative() {
     print "done"
 }
 
+fun yieldN(n) {
+    return () {
+        for (let i = 0; i < n; i++) {
+            yield i
+        }
+    }
+}
+
+print "---- interleaving"
 for (x in deliberative) {
     print "got: " + x
+}
+
+print "---- nesting"
+for (i in yieldN(3)) {
+    for (j in yieldN(3)) {
+        print [i, j]
+    }
 }
