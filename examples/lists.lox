@@ -28,3 +28,12 @@ let tos
 while (tos = stack.pop()) {
     print tos
 }
+
+// we can use lists in iterators, even cyclic ones
+let i = 0
+for (x in looped) {
+    if (x % 2 == 0) continue
+    print x
+    i++
+    if (i > 10) break
+}

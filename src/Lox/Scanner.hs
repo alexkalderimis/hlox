@@ -122,9 +122,8 @@ go (Just (c, rst)) =
                     Just ('/', rst') -> consumeComment rst'
                     mr               -> addToken SLASH >> advance >> go mr
             '"' -> advance >> string rst
-            '_' -> token (KEYWORD "_")
             _ | isDigit c -> number c rst
-            _ | isAlpha c -> varOrKeyword c rst
+            _ | isAlpha c || c == '_' -> varOrKeyword c rst
             _ -> unexpectedCharacter c rst
 
 varOrKeyword :: Char -> Text -> Scanner

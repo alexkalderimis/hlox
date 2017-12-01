@@ -74,6 +74,14 @@ let empty
             }
             return false
         }
+
+        __iter__() {
+            let list = this
+            while (list) {
+                yield list.head
+                list = list.tail
+            }
+        }
     }
 
     singleton = (x) => List(x, nil)

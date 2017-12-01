@@ -1,0 +1,16 @@
+fun deliberative() {
+    print "thinking...."
+    yield 1
+
+    print "still thinking ..."
+    yield 2
+
+    print "hmmmmmm"
+    yield 3
+
+    print "done"
+}
+
+for (x in deliberative) {
+    print "got: " + x
+}

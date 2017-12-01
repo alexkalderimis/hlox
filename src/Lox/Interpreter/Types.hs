@@ -18,7 +18,6 @@ module Lox.Interpreter.Types where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.STM
-import Control.Concurrent.MVar (MVar, putMVar, takeMVar, readMVar, newMVar)
 import Control.Exception (SomeException, IOException, ErrorCall(..), Handler(..),
   throwIO, toException, try, catches)
 import Control.Exception.Base (Exception)
@@ -131,13 +130,6 @@ runLoop = fmap (either (== LoxBreak) (const False)) . tryLoop
 returnVal :: LoxVal -> LoxM a
 returnVal val = LoxM $ \s -> throwIO (LoxReturn val s)
 
-yieldVal :: LoxVal -> LoxM ()
-yieldVal val = do
-    mchannel <- gets yieldChannel
-    case mchannel of
-      Nothing -> loxError "Cannot yield outside iterator"
-      Just channel -> liftIO (putMVar channel (Yielded val))
-
 returning :: LoxM a -> LoxM LoxVal
 returning (LoxM f) = LoxM $ \s -> do
     ret <- try (f s)
@@ -145,9 +137,16 @@ returning (LoxM f) = LoxM $ \s -> do
       Left (LoxReturn val s') -> return (val, s')
       Right (_, s') -> return (LoxNil, s')
 
+yieldVal :: LoxVal -> LoxM ()
+yieldVal val = do
+    channel <- gets yieldChannel
+                >>= maybe (loxError "Cannot yield outside iterator") return
+    liftIO . atomically $ putTMVar channel (Yielded val) 
+    liftIO . atomically $ putTMVar channel Waiting
+
 yielding :: LoxM LoxVal -> LoxM Stepper
 yielding lox = do
-    channel <- liftIO (newMVar Waiting)
+    channel <- liftIO $ newEmptyTMVarIO
     s <- get
 
     let 
@@ -155,13 +154,13 @@ yielding lox = do
         r <- runLox lox s { yieldChannel = Just channel }
         let yv = case r of Left e -> Failed e
                            Right a -> Done a
-        liftIO $ putMVar channel yv
+        liftIO . atomically $ putTMVar channel yv
 
       next started = do
         unless started runIterator
-        _ <- liftIO $ takeMVar channel -- unblock writer
-        val <- liftIO $ readMVar channel -- leave channel full
+        val <- liftIO . atomically $ takeTMVar channel
         case val of
+          Waiting -> next True
           Failed e -> throwError e
           Yielded r -> return (Just r, True)
           _ -> return (Nothing, True)
@@ -192,7 +191,7 @@ data Interpreter = Interpreter
     , initialising :: !Bool
     , stack :: ![StackFrame]
     , modcls :: !Class
-    , yieldChannel :: !(Maybe (MVar Yielded))
+    , yieldChannel :: !(Maybe (TMVar Yielded))
     } deriving (Typeable)
 
 data Yielded = Waiting
