@@ -266,8 +266,7 @@ data LoxVal
     deriving (Show, Typeable)
 
 -- embedded host object
-data HSObj = forall x. HSObj x Class
-                       (forall a b. (Typeable a, Typeable b) => (a -> b) -> Maybe b)
+data HSObj = HSObj Class (forall a b. (Typeable a, Typeable b) => (a -> b) -> Maybe b)
     deriving (Typeable)
 
 instance Show HSObj where
@@ -308,7 +307,7 @@ typeOf (LoxClass _) = "Class"
 typeOf (LoxObj c) = className $ objectClass c
 typeOf (LoxArray _) = "Array"
 typeOf (LoxIter _) = "Iterator"
-typeOf (NativeObj (HSObj _ cls _)) = className cls
+typeOf (NativeObj (HSObj cls _)) = className cls
 
 data LoxException = LoxError Text
                   | FieldNotFound Atom

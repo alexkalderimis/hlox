@@ -31,7 +31,7 @@ initHandle :: LoxM ()
 initHandle = loxError "Cannot construct Handle"
 
 iterFile :: LoxVal -> LoxM Stepper
-iterFile (NativeObj (HSObj _ _ call)) =
+iterFile (NativeObj (HSObj _ call)) =
     case call id of
       Just h -> return (Stepper (Just h) nextLine)
       Nothing -> loxError "Not a handle"
@@ -67,7 +67,7 @@ object = Object emptyClass <$> newTVarIO (HM.fromList flds)
 lopenFile :: Text -> LoxM LoxVal
 lopenFile fn = do
     h <- liftIO $ openFile (T.unpack fn) ReadMode
-    return $ NativeObj $ HSObj h handle (applyHandleFn h)
+    return $ NativeObj $ HSObj handle (applyHandleFn h)
 
 applyHandleFn :: (Typeable a, Typeable b) => Handle -> (a -> b) -> Maybe b
 applyHandleFn h f = case cast f of
@@ -81,14 +81,14 @@ handleMethods = HM.fromList
   ]
 
 readLineH :: LoxVal -> LoxM Text
-readLineH (NativeObj (HSObj _ _ call)) = do
+readLineH (NativeObj (HSObj _ call)) = do
     case call T.hGetLine of
       Just act -> liftIO act
       Nothing -> loxError "Not a handle"
 readLineH x = throwLox (TypeError "Handle" x)
 
 closeH :: LoxVal -> LoxM ()
-closeH (NativeObj (HSObj _ _ call)) = do
+closeH (NativeObj (HSObj _ call)) = do
     case call hClose of
       Just io -> liftIO io
       Nothing -> loxError "Not a handle"
