@@ -1,5 +1,6 @@
 let singleton
 let fromArray
+let empty
 
 {
     class List {
@@ -8,8 +9,8 @@ let fromArray
             this.tail = tail
         }
 
-        add(val) {
-            this.tail = List(this.head, this.tail)
+        push(val) {
+            if (this.head) this.tail = List(this.head, this.tail)
             this.head = val
         }
 
@@ -24,6 +25,25 @@ let fromArray
             return ret
         }
 
+        get(i) {
+            if (i < 0) throw "out of bounds"
+            if (i == 0) return this.head
+            if (this.tail) {
+                return this.tail.get(i - 1)
+            } else {
+                throw "out of bounds"
+            }
+        }
+
+        append(list) {
+            if (this.hasCycle()) throw "Cannot append to circular list"
+            if (this.tail) {
+                this.tail.append(list)
+            } else {
+                this.tail = list
+            }
+        }
+
         length() {
             if (this.hasCycle()) return 1 / 0
             return 1 + (if this.tail then this.tail.length() else 0)
@@ -31,7 +51,7 @@ let fromArray
 
         toString() {
             if (this.hasCycle()) return "List(" + this.head + ", <loop>)"
-
+  
             let ret = "List("
             let list = this
             while (list) {
@@ -45,20 +65,20 @@ let fromArray
         hasCycle() {
             let a = this
             let b = this.tail
-            while (true) {
-                if (a == nil or b == nil) {
-                    return false
-                }
+            while (a and b) {
                 if (a == b) {
                     return true
                 }
                 a = a.tail
                 b = if b.tail then b.tail.tail else nil
             }
+            return false
         }
     }
 
     singleton = (x) => List(x, nil)
+
+    empty = () => List(nil, nil)
 
     fromArray = (xs) {
         let ret = nil

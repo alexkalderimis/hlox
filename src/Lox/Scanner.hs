@@ -183,9 +183,7 @@ number i rst = do
 consumeComment :: Text -> Scanner
 consumeComment src = do
     let (prefix, rst) = breakOn "\n" src
-    modify' $ \s -> s { line = succ (line s)
-                      , char = 1 + length prefix + char s
-                      }
+    modify' $ \s -> s { char = 1 + length prefix + char s }
     scan rst
 
 advance :: Scanner

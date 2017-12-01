@@ -1,0 +1,18 @@
+fun foo(n) {
+    let i = 0
+    let r = i
+    while (true) {
+        if (i == n) return r
+        r += i
+        i++
+    }
+}
+
+print foo(100)
+
+let xs = [0,1,2,3,4,nil]
+let i = 0
+while(xs[i] and xs[i + 1]) {
+    i++
+}
+print i

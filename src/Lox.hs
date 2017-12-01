@@ -140,7 +140,7 @@ run' i ReplOpts{..} intS code = do
                                    return intS
                       Right (v, s) -> do
                           when (not showResult && not (nil v)) $
-                              printLox v
+                              void $ runLox (printLox v) s
                           when showResult $ do
                               putStrLn "==== RESULT"
                               print v

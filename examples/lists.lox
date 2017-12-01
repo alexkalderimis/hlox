@@ -1,0 +1,30 @@
+import examples.List
+
+let list = fromArray([10 .. 20])
+
+print list.hasCycle()
+print list.get(5)
+
+print list
+list.append(fromArray([100 .. 105]))
+print list
+
+let looped = fromArray([0 .. 5])
+looped.append(looped)
+print looped.hasCycle()
+print looped
+
+try {
+    looped.append(list)
+} catch (e) {
+    print "Nuh uh: " + e.message
+}
+
+let stack = empty()
+for (word in "reverse in are words these".split(" ")) {
+    stack.push(word)
+}
+let tos
+while (tos = stack.pop()) {
+    print tos
+}

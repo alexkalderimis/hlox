@@ -12,7 +12,7 @@ module Lox.Interpreter (
 
 import Prelude hiding (init)
 
-import Control.Exception (catch)
+import Control.Exception (catch, throwIO)
 import Control.Concurrent.STM
 import Control.Applicative
 import Control.Arrow (second)
@@ -54,7 +54,7 @@ class Monad m => MonadLox m where
 instance MonadLox IO where
     printLox a = do
         i <- interpreter mempty mempty
-        runLox (stringify a) i >>= either (error . show) T.putStrLn
+        runLox (stringify a) i >>= either throwIO T.putStrLn
 
 instance MonadLox LoxM where
     printLox a = do
@@ -178,11 +178,12 @@ exec' (If _ condition a mb) = {-# SCC "exec-while" #-} do
         then exec a
         else maybe (return def) exec mb
 
-exec' (While _ condition body) = loop
+exec' (While _ condition body) = lvoid loop
     where
-        loop = do done  <- (||) <$> (not . truthy <$> eval condition)
-                                <*> runLoop (exec body)
-                  if done then return def else loop
+        loop = do enterLoop <- truthy <$> eval condition
+                  when enterLoop $ do
+                    done <- runLoop (exec body)
+                    unless done loop
 
 exec' (Break _)    = throwLoop LoxBreak
 exec' (Continue _) = throwLoop LoxContinue
