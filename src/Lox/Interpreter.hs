@@ -274,6 +274,7 @@ lvoid :: LoxM a -> LoxM LoxVal
 lvoid = (LoxNil <$)
 
 iterable :: LoxVal -> LoxM Stepper
+iterable LoxNil = return (Stepper () (const $ pure (Nothing :: Maybe LoxVal, ())))
 iterable a = do
     mfn <- customIterable
     case mfn of
