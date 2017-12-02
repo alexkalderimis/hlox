@@ -22,6 +22,7 @@ import qualified Lox.Builtins.Random as R
 import qualified Lox.Builtins.String as S
 import qualified Lox.Builtins.IO as LoxIO
 import qualified Lox.Builtins.Thread as Thread
+import qualified Lox.Builtins.Regex as RE
 
 initInterpreter :: IO Interpreter
 initInterpreter = do
@@ -35,6 +36,7 @@ builtinModules = traverse sequenceA
     ,(ModuleIdentifier ["random"], R.random)
     ,(ModuleIdentifier ["io"], LoxIO.object)
     ,(ModuleIdentifier ["thread"], Thread.object)
+    ,(ModuleIdentifier ["re"], RE.object)
     ]
 
 builtins :: IO Env

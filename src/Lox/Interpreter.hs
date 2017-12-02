@@ -42,8 +42,7 @@ import Lox.Parser (runParser, tokenStream, program)
 import Lox.Optimise (fromParsed)
 import qualified Lox.Core.Array as A
 import Lox.Environment (
-    Ref, declare, assign, resolve, writeRef, deref, diffEnv,
-    enterScope, enterScopeWith)
+    Ref, declare, assign, resolve, writeRef, deref, diffEnv, enterScope)
 import Lox.Interpreter.Types
 
 type BinaryFn = (LoxVal -> LoxVal -> LoxM LoxVal)
@@ -519,13 +518,6 @@ instantiate cls args = do
     obj <- new cls mempty
     initialise (init obj args)
     return $! LoxObj obj
-
-bindThis :: LoxVal -> Callable -> LoxM Callable
-bindThis this (BuiltIn name ar fn)
-  = return $ BuiltIn name (\n -> ar (n + 1)) (\args -> fn (this : args))
-bindThis this (Closure lam s)
-  = do env <- liftIO (enterScopeWith [("this", this)] (bindings s))
-       return $ Closure lam s { bindings = env }
 
 withThis :: LoxVal -> Callable -> [LoxVal] -> LoxM LoxVal
 withThis this fn args = do bound <- bindThis this fn

@@ -76,6 +76,7 @@ instance Applicative LoxM where
         return (f $! x, s'')
 
 instance Monad LoxM where
+    fail msg = loxError (T.pack msg)
     (LoxM lox) >>= f = LoxM $ \s -> do
         (x, s') <- lox $! s
         let (LoxM lox') = f x
@@ -273,21 +274,26 @@ instance Show HSObj where
     show _ = "<hs-obj>"
 
 -- helper patterns to avoiding verbose literals
-pattern LoxNil, Yes, No :: LoxVal
+pattern LoxNil :: LoxVal
 pattern LoxNil = LoxLit Nil
+pattern Yes :: LoxVal
 pattern Yes = LoxLit (ABool True)
+pattern No :: LoxVal
 pattern No = LoxLit (ABool False)
 
-pattern LoxInt, Intish :: Int -> LoxVal
+pattern LoxInt :: Int -> LoxVal
 pattern LoxInt i = LoxLit (AInt i)
+pattern Intish :: Int -> LoxVal
 pattern Intish n <- LoxLit (asInt -> Just n) 
 
-pattern LoxDbl, LoxNum :: Double -> LoxVal
+pattern LoxDbl :: Double -> LoxVal
 pattern LoxDbl i = LoxLit (ADbl i)
+pattern LoxNum :: Double -> LoxVal
 pattern LoxNum d <- LoxLit (asDbl -> Just d) -- for things that can be interpreted as doubles
 
-pattern LoxString, Txt :: Text -> LoxVal
+pattern LoxString :: Text -> LoxVal
 pattern LoxString t = LoxLit (Str t) -- shim
+pattern Txt :: Text -> LoxVal
 pattern Txt t = LoxLit (Str t)
 
 pattern LoxBool :: Bool -> LoxVal
@@ -637,3 +643,15 @@ errorTrace frames = do
                     ,("context", Txt was)
                     ]
 
+getMethod :: Methods -> LoxVal -> Text -> LoxM LoxVal
+getMethod methods this name =
+    case HM.lookup name methods of
+      Just fn -> LoxFn <$> bindThis this fn
+      Nothing -> throwLox (FieldNotFound (Str name))
+
+bindThis :: LoxVal -> Callable -> LoxM Callable
+bindThis this (BuiltIn name ar fn)
+  = return $ BuiltIn name (\n -> ar (n + 1)) (\args -> fn (this : args))
+bindThis this (Closure lam s)
+  = do env <- liftIO (enterScopeWith [("this", this)] (bindings s))
+       return $ Closure lam s { bindings = env }

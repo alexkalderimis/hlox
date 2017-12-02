@@ -11,7 +11,7 @@ copyright:           2017 Author name here
 category:            Web
 build-type:          Simple
 extra-source-files:  README.md
-cabal-version:       >=2
+cabal-version:       >= 1.22
 
 library
   hs-source-dirs:      src
@@ -26,11 +26,12 @@ library
                       ,Lox.Core.Array
                       ,Lox.Builtins
                       ,Lox.Builtins.Array
+                      ,Lox.Builtins.IO
                       ,Lox.Builtins.Object
                       ,Lox.Builtins.Random
-                      ,Lox.Builtins.Thread
+                      ,Lox.Builtins.Regex
                       ,Lox.Builtins.String
-                      ,Lox.Builtins.IO
+                      ,Lox.Builtins.Thread
                       ,Lox.Transform
                       ,Lox.Analyse
                       ,Lox.VectorEnv
@@ -46,11 +47,12 @@ library
                      , haskeline
                      , vector
                      , random
-                     , containers >= 0.5.8
+                     , containers
                      , bifunctors
                      , data-default
                      , filepath
                      , array
+                     , regex-with-pcre
   default-language:    Haskell2010
   ghc-options:         -Wall -O2
 

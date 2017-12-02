@@ -12,7 +12,7 @@ import Control.Monad.IO.Class
 
 import Lox.Syntax (Atom(Str))
 import Lox.Interpreter.Types
-import Lox.Interpreter (stringify, bindThis)
+import Lox.Interpreter (stringify)
 
 handle :: Class
 handle = Class { className = "Handle"
@@ -22,7 +22,7 @@ handle = Class { className = "Handle"
                , staticMethods = mempty
                , methods = handleMethods
                , protocols = HM.fromList
-                             [(Gettable, callable "[]" getHandleMethod)
+                             [(Gettable, callable "[]" (getMethod handleMethods))
                              ,(Iterable, callable "__iter__" iterFile)
                              ]
                }
@@ -46,12 +46,6 @@ iterFile (NativeObj (HSObj _ call)) =
                        return (Just (Txt line), Just h)
 
 iterFile x = throwLox (TypeError "Handle" x)
-
-getHandleMethod :: LoxVal -> Text -> LoxM LoxVal
-getHandleMethod this name =
-    case HM.lookup name handleMethods of
-      Just fn -> LoxFn <$> bindThis this fn
-      Nothing -> throwLox (FieldNotFound (Str name))
 
 object :: IO Object
 object = Object emptyClass <$> newTVarIO (HM.fromList flds)
