@@ -3,18 +3,20 @@
 
 module Lox.Builtins (initInterpreter) where
 
+import Control.Applicative
 import Control.Concurrent.STM
 import Control.Monad.State.Class
 import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as HM
 import System.Clock
 import Data.Monoid ((<>))
+import qualified Data.Text.Read as Read
 import qualified Data.Vector as V
 import qualified Data.Text as T
 
 import Lox.Syntax
 import Lox.Environment (enterScopeWith)
-import Lox.Interpreter (apply)
+import Lox.Interpreter (apply, stringify)
 import Lox.Interpreter.Types
 import qualified Lox.Builtins.Array as A
 import qualified Lox.Builtins.Object as O
@@ -47,6 +49,8 @@ builtins = enterScopeWith vals mempty
                  [("clock", LoxFn (callable "clock" clock))
                  ,("apply", LoxFn (callable "apply" applyFun))
                  ,("typeof", LoxFn (callable "typeof" typeofFn))
+                 ,("number", LoxFn (callable "number" numberFn))
+                 ,("str", LoxFn (callable "str" stringify))
                  ]
 
 classes :: [Class] -> [(VarName, LoxVal)]
@@ -66,6 +70,18 @@ errorInit Object{..} msg = do
     trc <- errorTrace frame
     let props = [(Str "message", msg), (Str "stackTrace", trc)]
     liftIO $ atomically $ modifyTVar' objectFields (<> HM.fromList props)
+
+numberFn :: LoxVal -> LoxM LoxVal
+numberFn x = maybe (loxError "Not a number") return $ case x of
+    LoxInt _ -> return x
+    LoxDbl _ -> return  x
+    Txt t -> (LoxInt <$> (fromRead $ Read.decimal t))
+              <|>
+             (LoxDbl <$> (fromRead $ Read.double t))
+    _     -> Nothing
+    where
+        fromRead (Right (x,"")) = Just x
+        fromRead _ = Nothing
 
 typeofFn :: LoxVal -> LoxM T.Text
 typeofFn x = return $! typeOf x
