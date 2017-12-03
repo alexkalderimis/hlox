@@ -50,7 +50,8 @@ iterFile x = throwLox (TypeError "Handle" x)
 object :: IO Object
 object = Object emptyClass <$> newTVarIO (HM.fromList flds)
     where
-        flds = [(Str (fnName f), LoxFn (qualifyName "IO." f)) | f <- fns]
+        flds = (Str "stdin", NativeObj (HSObj handle (applyHandleFn stdin)))
+             : [(Str (fnName f), LoxFn (qualifyName "IO." f)) | f <- fns]
         fns = [callable "readFile" readFile'
               ,callable "gets" readLn'
               ,callable "put" T.putStr
