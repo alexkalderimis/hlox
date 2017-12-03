@@ -49,15 +49,21 @@ replace str o str' = do
   return (str ?=~/ SearchReplace re str')
 
 replaceAll :: Text -> LoxVal -> LoxVal -> LoxM Text
+
+-- replace using a text template (supporting capture references)
 replaceAll str pat (Txt replacement) = do
   re <- Regex.asRegex pat
   return (str *=~/ SearchReplace re replacement)
+
+-- replace using a match->replacement function
 replaceAll str pat (LoxFn fn) = do
   re <- Regex.asRegex pat
   let f match _ _ = case matchedText match of
         Nothing -> return Nothing
         Just t -> apply fn [Txt t] >>= fmap return . stringify 
   replaceAllCapturesM replaceMethods TOP f (str *=~ re)
+
+-- incompatible types
 replaceAll _ x y = throwLox $ ArgumentError
                    "String::replaceAll" ["String|Regex", "String|Function"] [x, y]
 
