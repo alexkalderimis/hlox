@@ -1,0 +1,25 @@
+import io
+import re
+
+class Counter extends Map {
+    add(k) {
+        this.put(k, 1 + (this.get(k) or 0))
+    }
+}
+let re = Regex("\w+")
+
+let counts = Counter()
+for (line in openFile("LICENSE")) {
+    for (word in re.match(line.lower())) {
+        counts.add(word)
+    }
+}
+let grouped = Map()
+for ([word, count] in counts.entries()) {
+    let grp = grouped.get(count) or []
+    grp.push(word)
+    grouped.put(count, grp)
+}
+for ([count, words] in grouped.entries().sortOn((x) => x[0]).reversed()) {
+    print count + ": " + words
+}
