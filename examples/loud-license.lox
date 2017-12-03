@@ -1,0 +1,7 @@
+import io
+import re
+
+let re = Regex("(must|provided that|may)")
+for (line in openFile("LICENSE")) {
+    print line.replaceAll(re, (t) => t.upper())
+}

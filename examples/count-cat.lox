@@ -1,0 +1,7 @@
+import io
+
+let lineNo = 1;
+for (line in stdin) {
+    print lineNo + (if lineNo < 10 then " " else "") + "| " + line
+    lineNo++
+}
