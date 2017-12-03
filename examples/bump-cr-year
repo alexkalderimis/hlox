@@ -1,0 +1,7 @@
+import io
+import re
+
+let re = Regex("\d{4}")
+for (line in openFile("LICENSE")) {
+    print line.replaceAll(re, (y) => number(y) + 1)
+}
