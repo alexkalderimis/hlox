@@ -36,7 +36,6 @@ import Data.Proxy
 import Data.Text (Text)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
-import Lox.Environment (readEnv, Environment)
 import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
@@ -44,6 +43,7 @@ import qualified Data.List as L
 import qualified Data.Text as T
 
 import Lox.Syntax
+import Lox.Environment (readEnv, Environment)
 import qualified Lox.Core.Array as A
 import Lox.Environment (resolve, deref, enterScopeWith)
 

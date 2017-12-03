@@ -2,12 +2,11 @@
 module Lox.Builtins.Regex where
 
 import Control.Concurrent.STM
-import Control.Exception (throwIO)
 import Control.Monad.IO.Class
 import Data.Monoid
 import Data.Text (Text)
 import Data.Typeable (Typeable, cast)
-import Text.RE.PCRE.Text
+import Text.RE.PCRE.Text hiding (re)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as T
 
@@ -15,7 +14,8 @@ import Lox.Syntax
 import Lox.Interpreter.Types
 
 -- we need this for dynamic dispatch
-newtype TyMatches = TM { unTyMatches :: Matches Text } deriving Typeable
+newtype TyMatches = TM { unTyMatches :: Matches Text }
+    deriving Typeable
 
 object :: IO Object
 object = Object emptyClass <$> newTVarIO (HM.fromList flds)
@@ -38,9 +38,22 @@ matchesCls = emptyClass
   , methods = matchesMethods
   , protocols = HM.fromList
                 [(Gettable, callable "[]" $ getMethod matchesMethods)
-                ,(Iterable, callable "__iter__" iterMatches)
+                ,(Iterable, natively "__iter__" iterMatches)
                 ]
   }
+
+instance IsLoxVal TyMatches where
+    toLoxVal m = NativeObj (HSObj matchesCls (fmap ($! m) . cast))
+    fromLoxVal x@(NativeObj (HSObj _ call)) =
+        case call id of
+          Just m -> Right m
+          Nothing -> Left (TypeError "Matches" x)
+    fromLoxVal x = Left (TypeError "Matches" x)
+
+asRegex :: LoxVal -> LoxM RE
+asRegex (LoxObj o) = getRE o
+asRegex (Txt t) = escape id (T.unpack t)
+asRegex _ = loxError "Cannot use as a Regex"
 
 regexMethods :: Methods
 regexMethods = HM.fromList
@@ -52,14 +65,11 @@ matchesMethods :: Methods
 matchesMethods = HM.fromList
   [("length", callable "Matches::length" matchesLength)]
 
-iterMatches :: LoxVal -> LoxM Stepper
-iterMatches (NativeObj (HSObj _ call)) = do
-  (TM ms) <- maybe (loxError "Not a match") return (call id)
-  return (Stepper (matches ms) next)
-    
-  where next [] = return (Nothing, [])
-        next (m:ms) = return (Just (Txt m), ms)
-iterMatches x = throwLox (TypeError "Matches" x)
+iterMatches :: TyMatches -> Stepper
+iterMatches (TM ms) = Stepper (matches ms) next
+    where
+        next []     = return (Nothing, [])
+        next (t:ts) = return (Just (Txt t), ts)
 
 matchesLength :: LoxVal -> LoxM Int
 matchesLength (NativeObj (HSObj _ call)) =
@@ -74,7 +84,7 @@ reMatch o t = do
     let ms = t *=~ pat
     return $ case countMatches ms of
                0 -> LoxNil
-               _ -> NativeObj $ HSObj matchesCls (fmap ($! TM ms) . cast)
+               _ -> toLoxVal (TM ms)
 
 reToString :: Object -> LoxM Text
 reToString o = do
@@ -86,10 +96,11 @@ getRE o = do
     (NativeObj (HSObj _ call)) <- (HM.! "_re") <$> liftIO (atomically . readTVar $ objectFields o)
     case call id of
       Just re -> return re
-      Nothing -> loxError "Not a regular expression"
+      Nothing -> throwLox (TypeError "Regex" (LoxObj o))
 
 initRegex :: Object -> Text -> LoxM ()
 initRegex o t = do
   re <- compileRegex (T.unpack t)
   liftIO $ atomically $ modifyTVar' (objectFields o)
-    $ HM.insert (Str "_re") $ NativeObj (HSObj emptyClass (fmap ($! re) . cast))
+    $ HM.insert (Str "_re")
+    $ NativeObj (HSObj emptyClass (fmap ($! re) . cast))

@@ -8,13 +8,14 @@ import Data.Monoid
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
+import Text.RE.PCRE.Text (SearchReplace(..), (*=~), (*=~/), (?=~/))
+import Text.RE.Replace (
+  replaceMethods, REContext(TOP), matchedText, replaceAllCapturesM)
 
 import Lox.Syntax
-import Lox.Interpreter (bindThis)
-import Lox.Interpreter.Types (
-    NativeFn, LoxException(..), Callable(..), Stepper(..), Class(..), Protocol(..),
-    LoxVal(..), pattern LoxNil, pattern LoxInt, pattern LoxDbl, pattern Txt,
-    callable, natively, atomArray, throwLox, unsafeSingleton, emptyClass, argumentError)
+import qualified Lox.Builtins.Regex as Regex
+import Lox.Interpreter.Types
+import Lox.Interpreter (stringify, apply)
 
 string :: Class
 string = emptyClass { className = "String"
@@ -37,8 +38,28 @@ stringMethods = [(n, BuiltIn ("String::" <> n) a f) | (BuiltIn n a f) <- fns]
               , natively "lower" T.toLower
               , callable "slice" slice
               , natively "length" T.length
+              , callable "replace" replace
+              , callable "replaceAll" replaceAll
               , BuiltIn "split" (\n -> 0 < n && n < 3) split
               ]
+
+replace :: Text -> Object -> Text -> LoxM Text
+replace str o str' = do
+  re <- Regex.getRE o
+  return (str ?=~/ SearchReplace re str')
+
+replaceAll :: Text -> LoxVal -> LoxVal -> LoxM Text
+replaceAll str pat (Txt replacement) = do
+  re <- Regex.asRegex pat
+  return (str *=~/ SearchReplace re replacement)
+replaceAll str pat (LoxFn fn) = do
+  re <- Regex.asRegex pat
+  let f match _ _ = case matchedText match of
+        Nothing -> return Nothing
+        Just t -> apply fn [Txt t] >>= fmap return . stringify 
+  replaceAllCapturesM replaceMethods TOP f (str *=~ re)
+replaceAll _ x y = throwLox $ ArgumentError
+                   "String::replaceAll" ["String|Regex", "String|Function"] [x, y]
 
 get :: NativeFn
 
