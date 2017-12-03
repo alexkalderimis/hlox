@@ -3,6 +3,7 @@
 
 module Lox.Builtins.Array (array) where
 
+import Control.Monad
 import Control.Monad.IO.Class
 import Control.Exception (throwIO)
 import Data.Monoid
@@ -42,8 +43,10 @@ arrayMethods = [(n, BuiltIn ("Array::" <> n) a f) | (BuiltIn n a f) <- fns]
               , callable "filter" filterArray
               , callable "map" mapArray
               , callable "reverse" (A.reverse . unAtomArray)
+              , callable "reversed" ((A.copy >=> (\a -> AtomArray a <$ A.reverse a)) . unAtomArray)
               , callable "sort" (A.sort cmp . unAtomArray)
               , callable "sorted" sortArray
+              , callable "sortOn" sortArrayOn
               , callable "push" pushArray
               , callable "pop" popArray
               , callable "size" arraySize
@@ -103,6 +106,13 @@ mapArray (AtomArray arr) fn = AtomArray <$> A.map (apply fn . return) arr
 
 sortArray :: AtomArray -> LoxM AtomArray
 sortArray (AtomArray arr) = AtomArray <$> A.sorted cmp arr
+
+sortArrayOn :: AtomArray -> Callable -> LoxM AtomArray
+sortArrayOn (AtomArray arr) fn = do
+  let cmp' a b = do a' <- apply fn [a]
+                    b' <- apply fn [b]
+                    cmp a' b'
+  AtomArray <$> A.sorted cmp' arr
 
 pushArray :: AtomArray -> LoxVal -> IO ()
 pushArray (AtomArray arr) x = A.push x arr

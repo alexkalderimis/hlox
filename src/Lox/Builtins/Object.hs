@@ -1,18 +1,17 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Lox.Builtins.Object (baseClass) where
+module Lox.Builtins.Object (baseClass, getObjectMethod, objectEntries) where
 
 import Control.Concurrent.STM
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.HashMap.Strict as HM
 
 import Lox.Syntax
-import Lox.Interpreter (bindThis)
 import Lox.Interpreter.Types (
     Class(..), AtomArray(..), Stepper(..), Object(..), LoxException(..), Protocol(..),
     LoxVal(..), LoxM,
-    throwLox, unsafeSingleton, callable, emptyClass
+    throwLox, unsafeSingleton, callable, emptyClass, objectMethod
     )
 import qualified Lox.Core.Array as A
 
@@ -57,19 +56,8 @@ getField :: Object -> Atom -> LoxM LoxVal
 getField inst@Object{..} key = do
     hm <- liftIO $ fields inst
     case HM.lookup key hm of
-         Nothing -> getMethod objectClass inst key
+         Nothing -> getObjectMethod inst key
          Just v -> return v
-
-getMethod :: Class -> Object -> Atom -> LoxM LoxVal
-getMethod cls inst key
-    | (Str k) <- key = case HM.lookup k (methods cls) of
-                        Nothing -> case superClass cls of
-                                     Nothing -> fieldNotFound
-                                     Just sup -> getMethod sup inst (Str k)
-                        Just fn -> LoxFn <$> bindThis (LoxObj inst) fn
-    | otherwise      = fieldNotFound
-    where
-        fieldNotFound = throwLox (FieldNotFound key)
 
 setField :: Object -> Atom -> LoxVal -> IO LoxVal
 setField Object{..} k v = 
@@ -77,3 +65,8 @@ setField Object{..} k v =
 
 fields :: Object -> IO (HM.HashMap Atom LoxVal)
 fields = atomically . readTVar . objectFields
+
+getObjectMethod :: Object -> Atom -> LoxM LoxVal
+getObjectMethod o k = maybe (throwLox $ FieldNotFound k) (fmap LoxFn)
+                            (objectMethod o k)
+

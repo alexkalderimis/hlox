@@ -16,6 +16,7 @@
 
 module Lox.Interpreter.Types where
 
+import Control.Applicative
 import Control.Concurrent (forkIO)
 import Control.Concurrent.STM
 import Control.Exception (SomeException, IOException, ErrorCall(..), Handler(..),
@@ -648,6 +649,12 @@ getMethod methods this name =
     case HM.lookup name methods of
       Just fn -> LoxFn <$> bindThis this fn
       Nothing -> throwLox (FieldNotFound (Str name))
+
+objectMethod :: Object -> Atom -> Maybe (LoxM Callable)
+objectMethod inst (Str key) = bindThis (LoxObj inst) <$> go (objectClass inst)
+    where
+        go cls = HM.lookup key (methods cls) <|> (superClass cls >>= go) 
+objectMethod _ _ = Nothing
 
 bindThis :: LoxVal -> Callable -> LoxM Callable
 bindThis this (BuiltIn name ar fn)

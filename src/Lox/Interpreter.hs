@@ -7,7 +7,7 @@
 
 module Lox.Interpreter (
     eval, apply, exec, bindThis, evaluate, run, printLox,
-    (<=>), stringify
+    (<=>), stringify, iterable
     ) where
 
 import Prelude hiding (init)
@@ -602,8 +602,9 @@ stringify (NativeObj (HSObj cls _)) = return $ "<" <> className cls <> ">"
 stringify (LoxFn _)  = return "<function>"
 stringify (LoxIter _)  = return "<iterator>"
 stringify (LoxClass cls) = return $ "<class " <> className cls <> ">"
-stringify (LoxObj o) | Just fn <- HM.lookup "toString" (methods $ objectClass o) = do
-    withThis (LoxObj o) fn [] >>= stringify
+stringify (LoxObj o) | Just lfn <- objectMethod o (Str "toString") = do
+    fn <- lfn
+    apply fn [] >>= stringify
 stringify (LoxObj Object{..}) = do
     fieldMap <- liftIO $ atomically (readTVar objectFields)
     let fs = L.sortBy (compare `on` fst) . HM.toList $ fieldMap

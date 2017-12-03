@@ -23,6 +23,7 @@ import qualified Lox.Builtins.String as S
 import qualified Lox.Builtins.IO as LoxIO
 import qualified Lox.Builtins.Thread as Thread
 import qualified Lox.Builtins.Regex as RE
+import qualified Lox.Builtins.Map as M
 
 initInterpreter :: IO Interpreter
 initInterpreter = do
@@ -41,7 +42,7 @@ builtinModules = traverse sequenceA
 
 builtins :: IO Env
 builtins = enterScopeWith vals mempty
-    where vals = classes [A.array, O.baseClass, errorCls, S.string]
+    where vals = classes [A.array, O.baseClass, errorCls, S.string, M.map]
                  ++
                  [("clock", LoxFn (callable "clock" clock))
                  ,("apply", LoxFn (callable "apply" applyFun))
