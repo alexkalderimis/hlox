@@ -5,6 +5,7 @@ module Lox.Builtins.String (string) where
 
 import Control.Exception (throwIO)
 import Data.Monoid
+import Data.String
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
@@ -96,10 +97,15 @@ iterStr t = return $ case T.uncons t of
 
 slice :: Text -> Int -> Int -> IO Text
 slice t i j
-  | 0 <= i && j < T.length t = return . T.take (j - i) $ T.drop i t
+  | i < 0                    = norm i >>= \i' -> slice t i' j
+  | j < 0                    = norm j >>= slice t i
+  | 0 <= i && j <= T.length t = return . T.take (j - i) $ T.drop i t
   | otherwise                = throwIO outofBounds
   where
-      outofBounds = LoxError "Indices out of bounds"
+      outofBounds = LoxError $ "Indices out of bounds " <> fromString (show (i,j))
+      norm idx = let normed = T.length t + idx + 1
+                  in if normed < 0 then throwIO outofBounds
+                                   else return normed
 
 split :: NativeFn
 split [Txt t]         = split [Txt t, Txt ""]

@@ -39,11 +39,12 @@ class Runner {
             if (verbosity > 0) this.out.writeLn(fac.name)
             for (meth in methods(false, fac)) {
               if (!testMethod.match(meth)) continue
+              let name = meth.slice(4, -1)
 
               try {
                 let inst = fac()
                 try {
-                  if (verbosity >  1) this.put("  " + meth)
+                  if (verbosity >  1) this.put("  " + name)
                   inst[meth]()
                   passed++
                   if (verbosity == 1) this.put(".")
@@ -54,7 +55,7 @@ class Runner {
                     this.put(" FAIL: " + e.class.name + " " + e["message"])
                     this.flush()
                   } else {
-                    this.putLn("  " + meth + " " + e.class.name + " " + e["message"])
+                    this.putLn("  " + name + " " + e.class.name + " " + e["message"])
                   }
                 }
                 try { inst.tearDown() }
