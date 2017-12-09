@@ -1,16 +1,10 @@
-class Map {}
-
 let xs = ["a", "b", "c", "d"]
 
 for (x in xs) {
     print x + "!"
 }
 
-let m = Map()
-m.key0 = 1
-m.key1 = 2
-m.key2 = 3
-
+let m = Map([["key-a",1],["key-b", 2],["key-c",3]])
 for (k in m) {
-    print "key: " + k
+    print k
 }

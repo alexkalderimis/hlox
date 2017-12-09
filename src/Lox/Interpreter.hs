@@ -105,6 +105,7 @@ exec' (ExprS e) = {-# SCC "exec-expr" #-} eval' e
 exec' (Throw _ e) = do v <- UserError <$> eval e
                        throwLox v
 
+exec' (Try _ stm []) = exec stm `catchError` const (return LoxNil)
 exec' (Try _ stm handlers) = exec stm `catchError` handleWith handlers
 
 exec' (DefineFn _ v args body) = {-# SCC "exec-define-fun" #-} do
@@ -145,14 +146,14 @@ exec' (ClassDecl _ name _ msuper methods) = do
                      [c] -> return $ Just c
                      _   -> loxError $ "Multiple constructors declared for " <> name
 
-    let cls = LoxClass Class { classId = classId
-                             , className = name
-                             , superClass = parent <|> Just base
-                             , initializer = constructor
-                             , staticMethods = HM.fromList statics
-                             , methods = HM.fromList instances
-                             , protocols = maybe mempty protocols parent
-                             }
+    let cls = LoxClass emptyClass
+                       { classId = classId
+                       , className = name
+                       , superClass = parent <|> Just base
+                       , initializer = constructor
+                       , staticMethods = HM.fromList statics
+                       , methods = HM.fromList instances
+                       }
     liftIO $ writeRef ref cls
     return cls
 
@@ -275,6 +276,7 @@ lvoid = (LoxNil <$)
 
 iterable :: LoxVal -> LoxM Stepper
 iterable LoxNil = return (Stepper () (const $ pure (Nothing :: Maybe LoxVal, ())))
+iterable (LoxIter it) = return it
 iterable a = do
     mfn <- customIterable
     case mfn of
@@ -496,24 +498,6 @@ lookupProtocol p a = do
                               Nothing -> superClass cls >>= classProtocol
                               Just fn -> return fn
 
-classOf :: LoxVal -> LoxM (Maybe Class)
-classOf x = case x of
-  (LoxString _) -> Just <$> knownClass "String"
-  (LoxArray _) -> Just <$> knownClass "Array"
-  (LoxObj o) -> return (Just $ objectClass o)
-  (NativeObj (HSObj cls _)) -> return (Just cls)
-  _ -> return Nothing
-
--- get a class we know to exist, from the base-environment
-knownClass :: VarName -> LoxM Class
-knownClass n = do
-    env <- gets baseEnv
-    mc <- liftIO $ join <$> traverse deref (resolve n env)
-    case mc of
-        Just (LoxClass c) -> return c
-        Nothing -> loxError $ "Illegal state - " <> n <> " not defined"
-        Just x  -> loxError $ "Illegal state - " <> n <> " defined as " <> typeOf x
-  
 instantiate :: Class -> [LoxVal] -> LoxM LoxVal
 instantiate cls args = do
     obj <- new cls mempty
@@ -602,7 +586,7 @@ stringify (NativeObj (HSObj cls _)) = return $ "<" <> className cls <> ">"
 stringify (LoxFn _)  = return "<function>"
 stringify (LoxIter _)  = return "<iterator>"
 stringify (LoxClass cls) = return $ "<class " <> className cls <> ">"
-stringify (LoxObj o) | Just lfn <- objectMethod o (Str "toString") = do
+stringify (LoxObj o) | Just lfn <- objectMethod (objectClass o) (LoxObj o) (Str "toString") = do
     fn <- lfn
     apply fn [] >>= stringify
 stringify (LoxObj Object{..}) = do

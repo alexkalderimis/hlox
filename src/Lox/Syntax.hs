@@ -22,7 +22,6 @@ import Data.Text
 import Data.Data (Typeable, Data)
 import GHC.Generics (Generic)
 import Data.Bifunctor.TH
-import qualified Data.Text as T
 
 type VarName = Text
 
@@ -215,10 +214,10 @@ data Atom
     | Str !Text
     deriving (Show, Data, Typeable, Generic)
 
-instance Hashable Atom
-
 instance IsString Atom where
-    fromString = Str . T.pack
+    fromString = Str . fromString
+
+instance Hashable Atom
 
 -- the differs from the derived instance in that it allows comparison between Int and Dbl
 instance Ord Atom where

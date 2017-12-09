@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 
 module Lox.Builtins (initInterpreter) where
 
@@ -7,6 +8,7 @@ import Control.Applicative
 import Control.Concurrent.STM
 import Control.Monad.State.Class
 import Control.Monad.IO.Class
+import Control.Monad (unless)
 import qualified Data.HashMap.Strict as HM
 import System.Clock
 import Data.Monoid ((<>))
@@ -40,6 +42,7 @@ builtinModules = traverse sequenceA
     ,(ModuleIdentifier ["io"], LoxIO.object)
     ,(ModuleIdentifier ["thread"], Thread.object)
     ,(ModuleIdentifier ["re"], RE.object)
+    ,(ModuleIdentifier ["reflect"], reflect)
     ]
 
 builtins :: IO Env
@@ -51,13 +54,14 @@ builtins = enterScopeWith vals mempty
                  ,("typeof", LoxFn (callable "typeof" typeofFn))
                  ,("number", LoxFn (callable "number" numberFn))
                  ,("str", LoxFn (callable "str" stringify))
+                 ,("assert", LoxFn (callable "assert" assert))
                  ]
 
 classes :: [Class] -> [(VarName, LoxVal)]
 classes cs = [(className c, LoxClass c) | c <- cs]
 
 errorCls :: Class
-errorCls = emptyClass
+errorCls = O.baseClass
     { className = "Error"
     , classId = unsafeSingleton ()
     , superClass = Just O.baseClass 
@@ -71,10 +75,13 @@ errorInit Object{..} msg = do
     let props = [(Str "message", msg), (Str "stackTrace", trc)]
     liftIO $ atomically $ modifyTVar' objectFields (<> HM.fromList props)
 
+assert :: LoxVal -> LoxVal -> LoxM ()
+assert x msg = unless (truthy x) $ throwLox (AssertionError msg)
+
 numberFn :: LoxVal -> LoxM LoxVal
-numberFn x = maybe (loxError "Not a number") return $ case x of
-    LoxInt _ -> return x
-    LoxDbl _ -> return  x
+numberFn n = maybe (loxError "Not a number") return $ case n of
+    LoxInt _ -> return n
+    LoxDbl _ -> return n
     Txt t -> (LoxInt <$> (fromRead $ Read.decimal t))
               <|>
              (LoxDbl <$> (fromRead $ Read.double t))
@@ -99,8 +106,32 @@ maths :: IO Object
 maths = Object O.baseClass <$> newTVarIO (HM.fromList flds)
     where
        flds = 
-           [(Str "pi",  LoxDbl pi)
-           ,(Str "sin", LoxFn (natively "Math.sin" (sin :: Double -> Double)))
-           ,(Str "cos", LoxFn (natively "Math.cos" (cos :: Double -> Double)))
-           ,(Str "tan", LoxFn (natively "Math.tan" (tan :: Double -> Double)))
+           [("pi",  LoxDbl pi)
+           ,("sin", LoxFn (natively "Math.sin" (sin :: Double -> Double)))
+           ,("cos", LoxFn (natively "Math.cos" (cos :: Double -> Double)))
+           ,("tan", LoxFn (natively "Math.tan" (tan :: Double -> Double)))
            ]
+
+reflect :: IO Object
+reflect = Object O.baseClass <$> newTVarIO (HM.fromList flds)
+    where
+        flds =
+            [("ownMethods", LoxFn (natively "Reflect.ownMethods" meths))
+            ,("methods", LoxFn (callable "Reflect.methods" methNames))
+            ,("functionName", LoxFn (natively "Reflect.functionName" fnName))
+            ]
+            
+        meths :: Object -> Stepper
+        meths o = Stepper (HM.elems $ methods (objectClass o)) (nextMeth o)
+        nextMeth o (fn:fns)= (,fns) . Just . LoxFn <$> bindThis (LoxObj o) fn
+        nextMeth _ _ = return (Nothing, [])
+
+        methNames :: Bool -> Class -> IO Stepper
+        methNames True cls = return $ iterateOverMethods (allMethods cls)
+        methNames False cls = return $ iterateOverMethods (methods cls)
+
+        allMethods cls = methods cls <> maybe mempty allMethods (superClass cls)
+
+        iterateOverMethods mths = Stepper (HM.keys mths) nextMethName
+        nextMethName [] = return (Nothing, [])
+        nextMethName (n:ns) = return (Just (Txt n), ns)

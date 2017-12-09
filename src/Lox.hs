@@ -177,6 +177,7 @@ runtimeError (RuntimeError ts e) = printError e >> printTrace ts
         printError (LoxError msg)    = putl $ "[INTERNAL ERROR] " <> msg
         printError (FieldNotFound k) = putl $ "[FIELD NOT FOUND] " <> pack (show k)
         printError (UserError val)   = putl $ "[ERROR] " <> pack (show val)
+        printError (AssertionError val) = putl $ "[FAILED ASSERTION] " <> pack (show val)
         printError (TypeError ty val) = do
             put "[TYPE ERROR]"
             put $ " expected " <> ty

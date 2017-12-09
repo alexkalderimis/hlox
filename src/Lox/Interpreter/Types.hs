@@ -25,7 +25,7 @@ import Control.Exception.Base (Exception)
 import Control.Monad.Error.Class
 import Control.Monad.IO.Class
 import Control.Monad.State.Class
-import Control.Monad (unless, void, foldM)
+import Control.Monad (join, unless, void, foldM)
 import Data.Bifunctor
 import Data.Data (Typeable, Data)
 import Data.Default
@@ -238,12 +238,15 @@ interpreter modules env = do
                       , ("FieldNotFound", Just "Error")
                       , ("TypeError", Just "Error")
                       , ("ArgumentError", Just "Error")
+                      , ("UserError", Just "Error")
+                      , ("AssertionError", Just "UserError")
                       , ("String", Nothing)
                       ]
         ensureCls e (n, ms) = do
             cls <- getCls e n
-            sup <- traverse (getCls e) ms
-            enterScopeWith [(n, LoxClass cls { superClass = sup })] e
+            sup <- traverse (getCls e) ms 
+            let val = LoxClass cls { superClass = sup }
+            enterScopeWith [(n, val)] e
         getCls e n = coreClass n e >>= either (throwIO . InitError) return
         getMod = do cls <- getCls env "Object"
                     cid <- newSingleton
@@ -322,6 +325,7 @@ data LoxException = LoxError Text
                   | TypeError Text LoxVal
                   | ArgumentError VarName [String] [LoxVal]
                   | CaughtEx SomeException
+                  | AssertionError LoxVal
                   deriving (Show, Typeable)
 
 data RuntimeError = RuntimeError
@@ -375,8 +379,8 @@ instance HasArity LoxVal where
 instance HasArity (LoxM a) where
     getArity _ = 0
 
-instance HasArity r => HasArity (v -> r) where
-    getArity _ = 1 + getArity (Proxy :: Proxy r)
+instance (IsLoxVal v, HasArity r) => HasArity (v -> r) where
+    getArity _ = 1 +  getArity (Proxy :: Proxy r)
 
 class IsNativeFn f where
     toNativeFn :: f -> NativeFn
@@ -401,8 +405,8 @@ natively n f = BuiltIn n (== 1) (toNativeFn (io . f))
         io = return
 
 callable :: forall f. (HasArity f, IsNativeFn f) => VarName -> f -> Callable
-callable n f = let a = getArity (Proxy :: Proxy f)
-                in BuiltIn n (== a) (toNativeFn f)
+callable name f = let n = getArity (Proxy :: Proxy f)
+                   in BuiltIn name (== n) (toNativeFn f)
 
 instance IsLoxVal LoxVal where
     toLoxVal = id
@@ -458,6 +462,11 @@ instance IsLoxVal Stepper where
     toLoxVal = LoxIter
     fromLoxVal (LoxIter s) = Right s
     fromLoxVal x = Left (TypeError "Iterator" x)
+
+instance IsLoxVal Class where
+    toLoxVal = LoxClass
+    fromLoxVal (LoxClass c) = Right c
+    fromLoxVal x = Left (TypeError "Class" x)
 
 class IsNativeResult r where
     toNativeResult :: r ->  IO (Either LoxException LoxVal)
@@ -614,6 +623,8 @@ runtimeToLoxVal e = do
     let cls n = liftIO (coreClass n env) >>= either throwLox return
         trc = ("stackTrace", trace)
     case (cause e) of
+      AssertionError m -> do ec <- cls "AssertionError"
+                             new ec [trc, ("message", m)]
       LoxError msg -> do ec <- cls "InternalError"
                          new ec [trc, ("message", Txt msg)]
       FieldNotFound k -> do ec <- cls "FieldNotFound"
@@ -650,12 +661,30 @@ getMethod methods this name =
       Just fn -> LoxFn <$> bindThis this fn
       Nothing -> throwLox (FieldNotFound (Str name))
 
-objectMethod :: Object -> Atom -> Maybe (LoxM Callable)
-objectMethod inst (Str key) = bindThis (LoxObj inst) <$> go (objectClass inst)
+objectMethod :: Class -> LoxVal -> Atom -> Maybe (LoxM Callable)
+objectMethod c inst (Str key) = bindThis inst <$> go c
     where
         go cls = HM.lookup key (methods cls) <|> (superClass cls >>= go) 
-objectMethod _ _ = Nothing
+objectMethod _ _ _ = Nothing
 
+classOf :: LoxVal -> LoxM (Maybe Class)
+classOf x = case x of
+  (LoxString _) -> Just <$> knownClass "String"
+  (LoxArray _) -> Just <$> knownClass "Array"
+  (LoxObj o) -> return (Just $ objectClass o)
+  (NativeObj (HSObj cls _)) -> return (Just cls)
+  _ -> return Nothing
+
+-- get a class we know to exist, from the base-environment
+knownClass :: VarName -> LoxM Class
+knownClass n = do
+    env <- gets baseEnv
+    mc <- liftIO $ join <$> traverse deref (resolve n env)
+    case mc of
+        Just (LoxClass c) -> return c
+        Nothing -> loxError $ "Illegal state - " <> n <> " not defined"
+        Just x  -> loxError $ "Illegal state - " <> n <> " defined as " <> typeOf x
+  
 bindThis :: LoxVal -> Callable -> LoxM Callable
 bindThis this (BuiltIn name ar fn)
   = return $ BuiltIn name (\n -> ar (n + 1)) (\args -> fn (this : args))

@@ -68,5 +68,5 @@ fields = atomically . readTVar . objectFields
 
 getObjectMethod :: Object -> Atom -> LoxM LoxVal
 getObjectMethod o k = maybe (throwLox $ FieldNotFound k) (fmap LoxFn)
-                            (objectMethod o k)
+                            (objectMethod (objectClass o) (LoxObj o) k)
 

@@ -1,0 +1,49 @@
+import core.test
+import io
+import re
+import thread as {sleep}
+
+class MySpec {
+    test0() { assertEq(100, 10 * 10) }
+    test1() { assertEq(1, 100) }
+    test2() { assert(true, "this is fine") }
+    test3() { assert(nil, "nil is bad") }
+}
+
+class Slow {
+    testSlow() {
+        sleep(3)
+    }
+    testSlowish() {
+        sleep(1)
+    }
+    testFast() {
+        sleep(0.5)
+    }
+}
+
+class TestWithTearDown {
+    init() {
+        this.file = openFile("LICENSE")
+    }
+
+    testLength() {
+        assert(this.file.readLine().length() > 0, "Line length is 0")
+    }
+
+    testHeader() {
+        let re = Regex("right")
+        assert(re.match(this.file.readLine()), "Line does not contain right")
+    }
+
+    testExpectFail() {
+        let re = Regex("reserved")
+        assert(re.match(this.file.readLine()), "Line does not contain reserved")
+    }
+
+    tearDown() {
+        this.file.close()
+    }
+}
+
+Runner([Slow, MySpec, TestWithTearDown]).run({verbosity: 2})

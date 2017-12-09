@@ -1,0 +1,66 @@
+import reflect
+import re
+import io
+
+fun assertEq(a, b) {
+    assert(a == b, a + " != " + b)
+}
+
+let testMethod = Regex("^test")
+
+class Runner {
+    init(factories) {
+        this.factories = factories
+        this.out = stdout
+        this.needsNL = false
+    }
+
+    flush() {
+        if (this.needsNL) this.out.writeLn("")
+        this.needsNL = false
+    }
+
+    put(x) {
+        this.out.write(x)
+        this.needsNL = true
+    }
+
+    putLn(x) {
+        this.flush()
+        this.out.writeLn(x)
+    }
+
+    run({verbosity = 1}) {
+        this.out.unbuffer()
+        let failed = 0
+        let passed = 0
+        for (fac in this.factories) {
+            this.flush()
+            if (verbosity > 0) this.out.writeLn(fac.name)
+            for (meth in methods(false, fac)) {
+              if (!testMethod.match(meth)) continue
+
+              try {
+                let inst = fac()
+                try {
+                  if (verbosity >  1) this.put("  " + meth)
+                  inst[meth]()
+                  passed++
+                  if (verbosity == 1) this.put(".")
+                  if (verbosity >  1) { this.put(" PASS"); this.flush() }
+                } catch (e) {
+                  failed++
+                  if (verbosity > 1) {
+                    this.put(" FAIL: " + e.class.name + " " + e["message"])
+                    this.flush()
+                  } else {
+                    this.putLn("  " + meth + " " + e.class.name + " " + e["message"])
+                  }
+                }
+                try { inst.tearDown() }
+              }
+            }
+        }
+        this.putLn("Passed = " + passed + "; failed = " + failed)
+    }
+}

@@ -5,6 +5,7 @@ import Data.Typeable (Typeable, cast)
 import qualified Data.Text.IO as T
 import qualified Data.Text as T
 import Data.Text (Text)
+import Data.Monoid
 import qualified Data.HashMap.Strict as HM
 import Control.Concurrent.STM
 import System.IO
@@ -22,10 +23,36 @@ handle = Class { className = "Handle"
                , staticMethods = mempty
                , methods = handleMethods
                , protocols = HM.fromList
-                             [(Gettable, callable "[]" (getMethod handleMethods))
+                             [(Gettable, callable "[]" getHandleMethod)
                              ,(Iterable, callable "__iter__" iterFile)
                              ]
                }
+
+writer :: Class
+writer = Class { className = "Writer"
+               , classId = unsafeSingleton ()
+               , superClass = Nothing
+               , initializer = Just (callable "Writer::init" initHandle)
+               , staticMethods = mempty
+               , methods = writerMethods
+               , protocols = HM.singleton Gettable $ callable "[]" (getMethod writerMethods)
+               }
+
+bihandle :: Class
+bihandle = Class { className = "ReadWrite"
+               , classId = unsafeSingleton ()
+               , superClass = Just handle
+               , initializer = Just (callable "Writer::init" initHandle)
+               , staticMethods = mempty
+               , methods = writerMethods
+               , protocols = protocols handle
+               }
+
+getHandleMethod :: LoxVal -> Atom -> LoxM LoxVal
+getHandleMethod this@(NativeObj (HSObj cls _)) name
+  = maybe (throwLox $ FieldNotFound name) (fmap LoxFn)
+          (objectMethod cls this name)
+getHandleMethod x _ = throwLox $ TypeError "Handle" x
 
 initHandle :: LoxM ()
 initHandle = loxError "Cannot construct Handle"
@@ -50,19 +77,31 @@ iterFile x = throwLox (TypeError "Handle" x)
 object :: IO Object
 object = Object emptyClass <$> newTVarIO (HM.fromList flds)
     where
-        flds = (Str "stdin", NativeObj (HSObj handle (applyHandleFn stdin)))
+        flds = (Str "stdin",  NativeObj (HSObj handle (applyHandleFn stdin)))
+             : (Str "stdout", NativeObj (HSObj writer (applyHandleFn stdout)))
+             : (Str "stderr", NativeObj (HSObj writer (applyHandleFn stderr)))
              : [(Str (fnName f), LoxFn (qualifyName "IO." f)) | f <- fns]
         fns = [callable "readFile" readFile'
               ,callable "gets" readLn'
               ,callable "put" T.putStr
               ,callable "warn" warn
-              ,callable "openFile" lopenFile
+              ,BuiltIn "openFile" (\n -> n == 1 || n == 2) lopenFile
               ]
 
-lopenFile :: Text -> LoxM LoxVal
-lopenFile fn = do
-    h <- liftIO $ openFile (T.unpack fn) ReadMode
-    return $ NativeObj $ HSObj handle (applyHandleFn h)
+lopenFile :: [LoxVal] -> LoxM LoxVal
+lopenFile [fn] = lopenFile [fn, LoxNil]
+lopenFile [Txt fn, x] = do
+    (iomode, cls) <- case x of
+        Txt "r"  -> return (ReadMode, handle)
+        Txt "w"  -> return (WriteMode, writer)
+        Txt "a"  -> return (AppendMode, writer)
+        Txt "rw" -> return (ReadWriteMode, bihandle)
+        LoxNil   -> return (ReadMode, handle)
+        Txt mode -> loxError ("Unknown file mode: " <> mode)
+        _        -> throwLox (TypeError "String" x)
+    h <- liftIO $ openFile (T.unpack fn) iomode
+    return $ NativeObj $ HSObj cls (applyHandleFn h)
+lopenFile args = throwLox (ArgumentError "openFile" ["String", "String?"] args)
 
 applyHandleFn :: (Typeable a, Typeable b) => Handle -> (a -> b) -> Maybe b
 applyHandleFn h f = case cast f of
@@ -74,6 +113,28 @@ handleMethods = HM.fromList
   [ ("readLine", callable "Handle::readLine" readLineH)
   , ("close", callable "Handle::close" closeH)
   ]
+
+writerMethods :: Methods
+writerMethods = HM.fromList
+  [ ("write", callable "Writer::write" $ writeH T.hPutStr)
+  , ("writeLn", callable "Writer::writeLn" $ writeH T.hPutStrLn)
+  , ("close", callable "Handle::close" closeH)
+  , ("unbuffer", callable "Handle::unbuffer" unbuffH)
+  ]
+
+unbuffH :: LoxVal -> LoxM ()
+unbuffH (NativeObj (HSObj _ call)) = do
+    case call (flip hSetBuffering NoBuffering) of
+      Just act -> liftIO act
+      Nothing -> loxError "Not a handle"
+unbuffH x = throwLox (TypeError "Handle" x)
+
+writeH :: (Handle -> Text -> IO ()) -> LoxVal -> Text -> LoxM ()
+writeH write this txt = case this of
+    NativeObj (HSObj _ call) -> maybe typeError liftIO $ call (flip write txt)
+    _                        -> typeError
+    where
+      typeError = throwLox (TypeError "Writer" this)
 
 readLineH :: LoxVal -> LoxM Text
 readLineH (NativeObj (HSObj _ call)) = do
