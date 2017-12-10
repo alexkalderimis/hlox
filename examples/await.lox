@@ -1,0 +1,25 @@
+import core.test
+import thread as Thread
+
+fun sum(from, to) {
+    let ret = 0
+    for (let i = from; i < to; i++) {
+        ret += i
+    }
+    return ret
+}
+
+class Spec {
+    testAwait() {
+        assertEq(100, Thread.await(Thread.run(() => 100)))
+    }
+
+    testAwaitMany() {
+        let x = 100000
+        let threads = [0 .. 9].map((n) => Thread.run(() => sum(n * x, (n + 1) * x)))
+        let res = threads.fold(0, (total, thread) => total + Thread.await(thread))
+        assertEq(res, 499999500000)
+    }
+}
+
+Runner([Spec]).run({verbosity: 2})

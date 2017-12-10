@@ -219,6 +219,14 @@ instance IsString Atom where
 
 instance Hashable Atom
 
+unatom :: Atom -> Text
+unatom x = case x of
+  Nil -> "nil"
+  ABool b -> toLower $ pack (show b)
+  ADbl n -> pack (show n)
+  AInt n -> pack (show n)
+  Str  s -> "\"" <> s <> "\""
+
 -- the differs from the derived instance in that it allows comparison between Int and Dbl
 instance Ord Atom where
     Nil `compare` _ = LT

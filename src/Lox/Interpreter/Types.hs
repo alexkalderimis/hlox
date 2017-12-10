@@ -628,11 +628,17 @@ runtimeToLoxVal e = do
       LoxError msg -> do ec <- cls "InternalError"
                          new ec [trc, ("message", Txt msg)]
       FieldNotFound k -> do ec <- cls "FieldNotFound"
-                            new ec [trc, ("key", LoxLit k)]
+                            new ec [trc
+                                   , ("message", Txt ("missing field: " <> unatom k))
+                                   , ("key", LoxLit k)]
       UserError val -> do ec <- cls "Error"
                           new ec [trc, ("message", val)]
       TypeError ty got -> do ec <- cls "TypeError"
-                             new ec [trc, ("expected", Txt ty), ("received", Txt (typeOf got))]
+                             new ec [trc
+                                    , ("message", Txt (ty <> " != " <> typeOf got))
+                                    , ("expected", Txt ty)
+                                    , ("received", Txt (typeOf got))
+                                    ]
       ArgumentError v _ _ -> do ec <- cls "ArgumentError"
                                 new ec [trc, ("callee", Txt v)]
       CaughtEx err -> do ec <- cls "InternalError"
