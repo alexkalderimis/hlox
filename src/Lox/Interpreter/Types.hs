@@ -44,7 +44,7 @@ import qualified Data.List as L
 import qualified Data.Text as T
 
 import Lox.Syntax
-import Lox.Environment (readEnv, Environment)
+import Lox.Environment (selectBindings, readEnv, Environment)
 import qualified Lox.Core.Array as A
 import Lox.Environment (resolve, deref, enterScopeWith)
 
@@ -196,7 +196,13 @@ data Interpreter = Interpreter
     , stack :: ![StackFrame]
     , modcls :: !Class
     , yieldChannel :: !(Maybe (TMVar Yielded))
+    , exports :: !(Maybe (HS.HashSet VarName))
     } deriving (Typeable)
+
+exported :: Interpreter -> Env
+exported st = case exports st of
+                Nothing -> mempty
+                Just vs -> selectBindings vs (bindings st)
 
 data Yielded = Waiting
              | Yielded LoxVal
@@ -227,7 +233,7 @@ interpreter modules env = do
     env' <- foldM ensureCls env coreClasses
     modCls <- getMod
     mods <- newIORef $ HM.fromList [(m, Loaded o { objectClass = modCls }) | (m, o) <- modules]
-    return $ Interpreter env' env' mods mempty False [] modCls Nothing
+    return $ Interpreter env' env' mods mempty False [] modCls Nothing Nothing
     where
         -- initial core object hierarchy
         coreClasses = [ ("Object", Nothing)
@@ -590,6 +596,7 @@ moduleInterpreter parent = parent { warnings = mempty
                                   , bindings = baseEnv parent
                                   , initialising = False
                                   , stack = []
+                                  , exports = Just mempty
                                   }
 
 newSingleton :: IO Singleton
@@ -697,3 +704,9 @@ bindThis this (BuiltIn name ar fn)
 bindThis this (Closure lam s)
   = do env <- liftIO (enterScopeWith [("this", this)] (bindings s))
        return $ Closure lam s { bindings = env }
+
+exporting :: Interpreter -> Bool
+exporting = isJust . exports
+
+export :: VarName -> Interpreter -> Interpreter
+export name st = st { exports = HS.insert name <$> exports st }

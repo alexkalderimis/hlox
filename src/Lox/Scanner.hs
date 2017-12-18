@@ -80,7 +80,7 @@ reservedWords = HS.fromList
     ,"print", "return", "throw", "try", "catch", "yield"
     ,"while", "for", "in", "break", "continue"
     ,"nil"
-    , "import", "as", "_"
+    ,"export", "import", "as", "_"
     ]
 
 scan :: Text -> Scanner

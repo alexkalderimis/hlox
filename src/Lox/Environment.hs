@@ -70,9 +70,7 @@ inCurrentScope _ _ = False
 boundNames :: (Hashable k, Eq k) => Environment k v -> HS.HashSet k
 boundNames = HS.fromList . HM.keys . envVars
 
--- remove all names bound in the lhs
-diffEnv :: (Hashable k, Eq k)
-        => Environment k v -> Environment k v -> Environment k v
-diffEnv lhs (Environment m) = Environment (foldr HM.delete m bound)
-    where bound = boundNames lhs
-
+selectBindings :: (Hashable k, Eq k)
+               => HS.HashSet k -> Environment k v -> Environment k v
+selectBindings ks (Environment m) = Environment $ HM.filterWithKey f m
+    where f k _ = HS.member k ks

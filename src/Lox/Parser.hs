@@ -85,12 +85,36 @@ eof = expect EOF <|> (do n <- next
 
 declaration :: Parser Statement
 declaration =   (importStatement <* semis)
+            <|> (exportStatement <* semis)
             <|> (classDeclaration <* semis)
             <|> (functionDefinition <* semis)
             <|> (varDefinition <* semis)
             <|> (varDeclaration <* semis)
             <|> statement
     where semis = skipWhile (== SEMICOLON)
+
+exportStatement :: Parser Statement
+exportStatement = do
+    keyword "export"
+    start <- loc
+    (name, s) <- exportedClass
+                  <|> exportedFunc
+                  <|> exportedDef
+    end <- loc
+    return (Export (span start end) name s)
+    where
+        exportedClass = do
+            s@(ClassDecl _ _ name _ _) <- classDeclaration
+            return (name, s)
+        exportedFunc = do
+            s@(DefineFn _ name _ _) <- functionDefinition
+            return (name, s)
+        exportedDef = do
+            name <- identifier
+            me <- optional (expect EQUAL >> expression)
+            return (name, maybe (Declare Unlocated name)
+                                (\e -> Define (sourceLoc e) (Name name) e)
+                                me)
 
 importStatement :: Parser Statement
 importStatement = do

@@ -1,3 +1,3 @@
 import examples.D as D
 
-let x = "B(" + D.val + ")"
+export x = "B(" + D.val + ")"

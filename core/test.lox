@@ -2,13 +2,13 @@ import reflect
 import re
 import io
 
-fun assertEq(a, b) {
+export fun assertEq(a, b) {
     assert(a == b, a + " != " + b)
 }
 
 let testMethod = Regex("^test")
 
-class Runner {
+export class Runner {
     init(factories) {
         this.factories = factories
         this.out = stdout

@@ -42,7 +42,7 @@ import Lox.Parser (runParser, tokenStream, program)
 import Lox.Optimise (fromParsed)
 import qualified Lox.Core.Array as A
 import Lox.Environment (
-    Ref, declare, assign, resolve, writeRef, deref, diffEnv, enterScope)
+    Ref, declare, assign, resolve, writeRef, deref, enterScope)
 import Lox.Interpreter.Types
 
 type BinaryFn = (LoxVal -> LoxVal -> LoxM LoxVal)
@@ -97,6 +97,11 @@ exec' (Import _ modid mp) = do
                                              ]
 
     declareAndBind p (LoxObj obj)
+
+exec' (Export _ varname s) = do
+  gets exporting >>= flip unless (loxError "Unexpected export statement")
+  modify' (export varname)
+  exec s
 
 exec' (Print _ e) = def <$ (eval e >>= printLox)
 
@@ -689,9 +694,9 @@ loadModule m = do
                 Left e -> loxError ("Could not parse " <> showModId m <> ", " <> T.pack (show e))
                 Right r -> return r
     put (moduleInterpreter s)
-    env <- evaluate (fromParsed parsed) >> gets bindings
+    env <- evaluate (fromParsed parsed) >> gets exported
     put s
-    vals <- liftIO (envToFields $ diffEnv (bindings s) env)
+    vals <- liftIO (envToFields env)
     return (Object (modcls s) vals)
     where
         fileNotFound _ = loxError ("Could not find module: " <> showModId m)

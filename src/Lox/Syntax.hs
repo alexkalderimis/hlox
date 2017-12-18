@@ -86,6 +86,7 @@ data Statement' v a
     | Try Loc (Statement' v a) [(v, Statement' v a)]
     | While Loc (Expr' v a) (Statement' v a)
     | Import Loc ModuleIdentifier (Maybe (Pattern v a))
+    | Export Loc v (Statement' v a)
     deriving (Show, Data, Typeable, Functor)
 
 instance Located (Statement' v a) where
@@ -107,6 +108,7 @@ instance Located (Statement' v a) where
     sourceLoc (Throw loc _) = loc
     sourceLoc (Try loc _ _) = loc
     sourceLoc (Import loc _ _) = loc
+    sourceLoc (Export loc _ _) = loc
 
 instance Described (Statement' v a) where
     describe Block{} = "Block"
@@ -127,6 +129,7 @@ instance Described (Statement' v a) where
     describe Try{} = "Try/Catch"
     describe While{} = "While loop"
     describe Import{} = "Import statement"
+    describe Export{} = "Export statement"
 
 type LVal = LVal' VarName Atom
 data LVal' v a

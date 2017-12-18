@@ -1,104 +1,102 @@
-let singleton
-let fromArray
-let empty
+export singleton
+export fromArray
+export empty
 
-{
-    class List {
-        init(x, tail) {
-            this.head = x
-            this.tail = tail
-        }
-
-        push(val) {
-            if (this.head) this.tail = List(this.head, this.tail)
-            this.head = val
-        }
-
-        pop() {
-            let ret = this.head
-            if (this.tail) {
-                this.head = this.tail.head
-                this.tail = this.tail.tail
-            } else {
-                this.tail = this.head = nil
-            }
-            return ret
-        }
-
-        get(i) {
-            if (i < 0) throw "out of bounds"
-            if (i == 0) return this.head
-            if (this.tail) {
-                return this.tail.get(i - 1)
-            } else {
-                throw "out of bounds"
-            }
-        }
-
-        append(list) {
-            if (this.hasCycle()) throw "Cannot append to circular list"
-            if (this.tail) {
-                this.tail.append(list)
-            } else {
-                this.tail = list
-            }
-        }
-
-        length() {
-            if (this.hasCycle()) return 1 / 0
-            return 1 + (if this.tail then this.tail.length() else 0)
-        }
-
-        toString() {
-            if (this.hasCycle()) return "List(" + this.head + ", <loop>)"
-  
-            let ret = "List("
-            let list = this
-            while (list) {
-                ret += list.head
-                if (list.tail) ret += ", "
-                list = list.tail
-            }
-            return ret + ")"
-        }
-
-        hasCycle() {
-            let a = this
-            let b = this.tail
-            while (a and b) {
-                if (a == b) {
-                    return true
-                }
-                a = a.tail
-                b = if b.tail then b.tail.tail else nil
-            }
-            return false
-        }
-
-        __iter__() {
-            let list = this
-            while (list) {
-                yield list.head
-                list = list.tail
-            }
-        }
+class List {
+    init(x, tail) {
+        this.head = x
+        this.tail = tail
     }
 
-    singleton = (x) => List(x, nil)
+    push(val) {
+        if (this.head) this.tail = List(this.head, this.tail)
+        this.head = val
+    }
 
-    empty = () => List(nil, nil)
-
-    fromArray = (xs) {
-        let ret = nil
-        let curr = ret
-        for (x in xs) {
-            let node = singleton(x)
-            if (ret) {
-                curr = curr.tail = node
-            } else {
-                curr = ret = node
-            }
+    pop() {
+        let ret = this.head
+        if (this.tail) {
+            this.head = this.tail.head
+            this.tail = this.tail.tail
+        } else {
+            this.tail = this.head = nil
         }
         return ret
     }
+
+    get(i) {
+        if (i < 0) throw "out of bounds"
+        if (i == 0) return this.head
+        if (this.tail) {
+            return this.tail.get(i - 1)
+        } else {
+            throw "out of bounds"
+        }
+    }
+
+    append(list) {
+        if (this.hasCycle()) throw "Cannot append to circular list"
+        if (this.tail) {
+            this.tail.append(list)
+        } else {
+            this.tail = list
+        }
+    }
+
+    length() {
+        if (this.hasCycle()) return 1 / 0
+        return 1 + (if this.tail then this.tail.length() else 0)
+    }
+
+    toString() {
+        if (this.hasCycle()) return "List(" + this.head + ", <loop>)"
+
+        let ret = "List("
+        let list = this
+        while (list) {
+            ret += list.head
+            if (list.tail) ret += ", "
+            list = list.tail
+        }
+        return ret + ")"
+    }
+
+    hasCycle() {
+        let a = this
+        let b = this.tail
+        while (a and b) {
+            if (a == b) {
+                return true
+            }
+            a = a.tail
+            b = if b.tail then b.tail.tail else nil
+        }
+        return false
+    }
+
+    __iter__() {
+        let list = this
+        while (list) {
+            yield list.head
+            list = list.tail
+        }
+    }
+}
+
+singleton = (x) => List(x, nil)
+
+empty = () => List(nil, nil)
+
+fromArray = (xs) {
+    let ret = nil
+    let curr = ret
+    for (x in xs) {
+        let node = singleton(x)
+        if (ret) {
+            curr = curr.tail = node
+        } else {
+            curr = ret = node
+        }
+    }
+    return ret
 }
